@@ -720,7 +720,7 @@
     },
     "distribution": {
       "status": "pending",
-      "comment": "Public source publication is authorised and project/issue URLs are real. Private reporting, HACS, Codecov and upstream branding acceptance remain separate requirements."
+      "comment": "Public source hosting and Codecov reporting are verified. Private reporting, HACS and upstream branding acceptance remain incomplete; hosted coverage does not establish supported hardware or release readiness."
     }
   }
 }

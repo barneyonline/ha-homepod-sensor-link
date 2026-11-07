@@ -54,4 +54,4 @@ The workflow keeps GitHub repository permissions at `contents: read` and support
 
 After validation succeeds, a separate Codecov job downloads this run's coverage artifact and uploads only `coverage.xml` from each HA version. The `CODECOV_TOKEN` secret is scoped to the pinned upload action and is never passed to validation or pull-request runs. Uploads run only on trusted `main`; the job checks out source without persisted Git credentials and executes no repository-authored shell commands. Uploader integrity verification remains enabled. Codecov configuration uses 100% project/patch targets; the exact local per-module and JavaScript gates remain authoritative for every pull request. The public badge reports Python integration coverage, while JavaScript is gated separately.
 
-Hosted CI has independently passed; Codecov report acceptance, releases, separate Wiki publication and HACS/brands acceptance remain distinct outcomes.
+Hosted CI and Codecov report acceptance have independently passed. Releases, separate Wiki publication and HACS/brands acceptance remain distinct outcomes.

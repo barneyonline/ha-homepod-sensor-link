@@ -19,7 +19,7 @@
 - Prove a protection-preserving extraction workflow on a named macOS/iOS/backup/application combination. The source-researched GUI backup path is currently a candidate; binary or missing records are not usable credentials.
 - Separately authorise device testing through the existing 1Password workflow. Verify User access, fresh readings, unchanged Apple Home records, cancellation/ambiguous-write/restart safety and recovery on supported firmware.
 - Recover original development provenance for `2d5e069` if available. Current publication preserves the existing GitHub history and scans files/index/reachable commits; that does not authenticate the missing earlier baseline.
-- Track hosted CI on the authorised public source repository. Establish private security reporting and verify supported-release, HACS/branding and Codecov requirements separately. Repository hosting is not acceptance or hardware verification.
+- Keep the verified hosted CI and Codecov reporting healthy. Establish private security reporting and verify supported-release and HACS/branding requirements separately. Repository hosting is not acceptance or hardware verification.
 
 ## Deliberate boundaries
 
