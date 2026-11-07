@@ -105,7 +105,11 @@ class RepositoryContractTests(unittest.TestCase):
         workflow = yaml.load((ROOT / ".github/workflows/validate.yml").read_text(), Loader=yaml.BaseLoader)
         job = workflow["jobs"]["codecov"]
         self.assertEqual(job["needs"], "validate")
-        self.assertEqual(job["if"], "${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}")
+        self.assertEqual(
+            job["if"],
+            "${{ github.repository == 'barneyonline/ha-homepod-sensor-link' "
+            "&& github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}",
+        )
         self.assertNotIn("env", job)
         self.assertEqual(json.dumps(workflow).count("secrets."), 1)
         self.assertNotIn("secrets.", json.dumps(workflow["jobs"]["validate"]))
