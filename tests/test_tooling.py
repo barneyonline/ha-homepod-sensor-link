@@ -65,6 +65,43 @@ class CoverageGateTests(unittest.TestCase):
 
 
 class DocumentationGateTests(unittest.TestCase):
+    def test_github_export_preserves_anchors_external_links_and_local_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, exported = (Path(directory) / name for name in ("source", "export"))
+            root.mkdir()
+            (root / "source.md").write_text(
+                "# Start\n\n[Self](source.md#start) [Other](other.md) [External](https://example.invalid/guide)\n"
+            )
+            (root / "other.md").write_text("# Other\n")
+            with patch("scripts.build_wiki.PAGES", {"Home": "source.md", "Other": "other.md"}):
+                build(root)
+                local = (root / "wiki/Home.md").read_text()
+                build(root, github=True, output=exported)
+                build(root, github=True, output=exported, check=True)
+                published = (exported / "Home.md").read_text()
+                self.assertIn("https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Home#start", published)
+                self.assertIn("https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Other)", published)
+                self.assertIn("[External](https://example.invalid/guide)", published)
+                self.assertNotIn("Home.md#start", published)
+                self.assertIn("/wiki/Other)", (exported / "_Sidebar.md").read_text())
+                self.assertEqual((root / "wiki/Home.md").read_text(), local)
+
+    def test_published_export_cannot_replace_source_or_unexpected_pages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, exported = (Path(directory) / name for name in ("source", "export"))
+            root.mkdir()
+            (root / "source.md").write_text("# Start\n")
+            with patch("scripts.build_wiki.PAGES", {"Home": "source.md"}):
+                for options in ({"github": True}, {"github": True, "output": root / "wiki"}):
+                    with self.assertRaises(ValueError):
+                        build(root, **options)
+                exported.mkdir()
+                unrelated = exported / "Unrelated.md"
+                unrelated.write_text("Preserve this work")
+                with self.assertRaises(ValueError):
+                    build(root, github=True, output=exported)
+                self.assertEqual(unrelated.read_text(), "Preserve this work")
+
     def test_missing_and_escaping_links_fail_without_following_external_urls(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

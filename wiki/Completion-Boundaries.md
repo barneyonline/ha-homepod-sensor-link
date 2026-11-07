@@ -27,7 +27,7 @@ Final name/domain/repository: **HomePod Sensor Link**, `homepod_sensor_link`, `b
 1. **Extraction proof:** the macOS encrypted-backup GUI is source-researched, not real-backup verified. The guide cannot be advertised as a tested supported route until the exact HomeKit records export intact on a recorded OS/application combination.
 2. **Hardware support:** User pairing/read access, Apple Home preservation and full device lifecycle must be verified under separate live authorisation and the existing 1Password workflow before supported-release claims.
 3. **Git provenance:** publication preserves the existing GitHub initial commit. Current files, index and reachable history are scanned; the earlier development baseline `2d5e069` is still unavailable and unauthenticated. No replacement baseline or fabricated ancestry is claimed.
-4. **Distribution:** source publication to the existing GitHub repository is authorised. Hosted CI results are tracked in Actions. A release, HACS/branding acceptance, private reporting and separate GitHub Wiki publication are distinct remaining steps; no live deployment is authorised.
+4. **Distribution:** source and GitHub Wiki publication are authorised. Hosted CI and Codecov reporting have passed. A release, HACS/branding acceptance and private reporting are distinct remaining steps; no live deployment is authorised.
 5. **Deliberate exclusions:** no implicit extraction, SIP/AMFI changes, keychain/backup access by the integration, native storage edits, credential rotation, automatic controller revocation or legacy migration.
 
 No live HA installation, accessory, backup, keychain or credential was accessed. The browser preview used only a synthetic local harness. See `VALIDATION.md` for observed checks.

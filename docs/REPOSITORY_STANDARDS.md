@@ -4,8 +4,8 @@ Reviewed local `ha-enphase-ev-charger` (public name Enphase Energy), `ha-energy-
 
 | Reference pattern | HomePod Sensor Link implementation |
 |---|---|
-| Short feature/setup README with documentation navigation | README links to task-based documentation and local wiki |
-| Wiki Home, sidebar, setup, operation, troubleshooting and development pages | Generated `wiki/` with drift and local-link checks; no remote sync |
+| Short feature/setup README with documentation navigation | README links to the published GitHub Wiki |
+| Wiki Home, sidebar, setup, operation, troubleshooting and development pages | Published Wiki with versioned sources, portable snapshots and a separate native-link export; no implicit remote sync |
 | Pinned Docker validation and explicit compatibility | Existing two HA versions retained; central tooling inventory; offline tests and read-only source mounts |
 | Statement and branch coverage evidence | Exact 100% statements/branches per Python module, full credential-panel Node coverage and JSON/XML evidence |
 | Consistent formatting and lint | Pinned Ruff correctness rules and formatter; shared editor settings |

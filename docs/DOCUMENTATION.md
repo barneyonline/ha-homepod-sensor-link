@@ -2,7 +2,7 @@
 
 Discover HomePod temperature and humidity sensors, adopt existing native sensors, and manage dedicated sensor access with optional pairing recovery.
 
-This is experimental development documentation for the public source repository. A separate GitHub Wiki publication, HACS listing and supported hardware verification are not claimed. Requires Home Assistant 2026.10.0 or newer; the tested matrix is 2026.10.0 and 2026.11.0.
+This Wiki is the reader-facing documentation for the experimental community integration. A HACS listing and supported hardware verification are not claimed. Requires Home Assistant 2026.10.0 or newer; the tested matrix is 2026.10.0 and 2026.11.0.
 
 ## Common tasks
 
@@ -24,4 +24,4 @@ This is experimental development documentation for the public source repository.
 - [Quality target and readiness](QUALITY.md), [quality research](QUALITY_RESEARCH.md) and [dependency ownership](DEPENDENCIES.md)
 - [Repository alignment](REPOSITORY_STANDARDS.md) and [release notes](../CHANGELOG.md)
 
-These pages also generate the local `wiki/` tree, including its navigation sidebar. `python3 scripts/build_wiki.py --check` detects drift. Publishing the wiki is a separate, authorised step; there is no automatic remote sync.
+The [source repository](https://github.com/barneyonline/ha-homepod-sensor-link) retains the canonical documentation and generated snapshots so changes can be reviewed and checked. For documentation updates, follow the contribution and development guides. Wiki publication is explicit; CI does not write to the Wiki.
