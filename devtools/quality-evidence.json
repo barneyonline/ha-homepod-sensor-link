@@ -711,8 +711,12 @@
       "comment": "Authorised HomePod setup, User access, preservation, restart/recovery/removal need proof through the existing 1Password workflow."
     },
     "hosted-ci": {
-      "status": "pending",
-      "comment": "The public source repository and read-only workflow are configured. A successful hosted run must be independently recorded; local results alone are insufficient."
+      "status": "done",
+      "comment": "GitHub Actions successfully ran both pinned offline HA suites, exact coverage, strict typing, hassfest, formatting and JavaScript coverage on the published implementation commit. This does not establish hardware or release readiness.",
+      "evidence": [
+        "https://github.com/barneyonline/ha-homepod-sensor-link/actions/runs/42424449553",
+        "https://github.com/barneyonline/ha-homepod-sensor-link/commit/3b4c407d75ab023927ef651f1579bdde19c1327c"
+      ]
     },
     "distribution": {
       "status": "pending",

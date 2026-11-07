@@ -33,6 +33,6 @@ Revisit these exemptions if the corresponding platform or outbound HTTP client i
 
 The manifest points to the public source repository's README and issue tracker. The repository preserves its existing initial commit. These working endpoints do not establish private reporting, supported hardware, HACS acceptance or an officially awarded tier.
 
-`--require-complete` refuses the two todos. `--require-release-ready` also refuses the five pending evidence gates: actual Git provenance/index/history; authorised controller-extraction proof; authorised hardware/firmware/lifecycle proof; hosted CI; and public distribution/reporting/HACS/branding/Codecov readiness. No values or private artifacts belong in evidence files.
+`--require-complete` refuses the two todos. `--require-release-ready` also refuses the four pending evidence gates: original development provenance; authorised controller-extraction proof; authorised hardware/firmware/lifecycle proof; and supported distribution/reporting/HACS/branding/Codecov readiness. The hosted-CI gate is complete with the independently verified [first successful run](https://github.com/barneyonline/ha-homepod-sensor-link/actions/runs/42424449553). No values or private artifacts belong in evidence files.
 
 See [development commands](Development-Environment.md), [observed validation](Validation.md) and [remaining delivery boundaries](Completion-Boundaries.md). Source publication is authorised; live verification, releases and additional distribution steps remain separate.

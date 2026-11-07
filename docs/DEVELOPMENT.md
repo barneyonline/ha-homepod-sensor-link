@@ -48,4 +48,4 @@ The Git audit fails when actual metadata is missing. Publication preserves the e
 
 Edit canonical source pages, regenerate `wiki/` with `python3 scripts/build_wiki.py`, then validate. Local links, English/action/entity/issue translations, metadata and generated-page drift are checked.
 
-The prepared read-only workflow runs scheduled/manual checks and supports manual `local`, `platinum` and `release` readiness modes. It has no live secrets, publication/deployment steps or wiki push. Dependabot proposes weekly Action updates only after a real repository is hosted and enabled. Hosted CI, HACS/brands/Codecov setup and publication remain separate outcomes.
+The read-only workflow runs on the public source repository and supports scheduled/manual checks with `local`, `platinum` and `release` readiness modes. It has no live secrets, publication/deployment steps or wiki push. Dependabot proposes weekly Action updates. Hosted CI has independently passed; releases, separate Wiki publication and HACS/brands/Codecov setup remain distinct outcomes.

@@ -36,7 +36,7 @@ class RepositoryContractTests(unittest.TestCase):
     def test_all_quality_rules_have_evidence_but_external_readiness_is_not_fabricated(self):
         counts, pending = validate(ROOT)
         self.assertEqual(counts, {"done": 49, "exempt": 3, "todo": 2})
-        self.assertEqual(len(pending), 5)
+        self.assertEqual(set(pending), {"git-provenance", "controller-extraction", "hardware", "distribution"})
         for mode in ("require_complete", "require_release_ready"):
             with self.assertRaises(ValueError):
                 validate(ROOT, **{mode: True})
