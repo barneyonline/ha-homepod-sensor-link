@@ -89,9 +89,10 @@ class RepositoryContractTests(unittest.TestCase):
                 self.assertEqual(workflow["permissions"], {"contents": "read"})
                 self.assertNotIn("pull_request_target", workflow["on"])
                 self.assertNotIn("workflow_run", workflow["on"])
-                self.assertNotIn("secrets.", text)
                 self.assertNotIn(": write", text)
-                for job in workflow["jobs"].values():
+                for name, job in workflow["jobs"].items():
+                    if name != "codecov":
+                        self.assertNotIn("secrets.", json.dumps(job))
                     self.assertLessEqual(int(job["timeout-minutes"]), 15)
                     for step in job["steps"]:
                         if "uses" in step:
@@ -99,6 +100,39 @@ class RepositoryContractTests(unittest.TestCase):
                         if step.get("uses", "").startswith("actions/checkout@"):
                             self.assertEqual(step["with"]["persist-credentials"], "false")
                             self.assertEqual(step["with"]["fetch-depth"], "0")
+
+    def test_codecov_secret_is_isolated_to_validated_main_reports(self):
+        workflow = yaml.load((ROOT / ".github/workflows/validate.yml").read_text(), Loader=yaml.BaseLoader)
+        job = workflow["jobs"]["codecov"]
+        self.assertEqual(job["needs"], "validate")
+        self.assertEqual(job["if"], "${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}")
+        self.assertNotIn("env", job)
+        self.assertEqual(json.dumps(workflow).count("secrets."), 1)
+        self.assertNotIn("secrets.", json.dumps(workflow["jobs"]["validate"]))
+        secret_steps = [step for step in job["steps"] if "secrets." in json.dumps(step)]
+        self.assertEqual(len(secret_steps), 1)
+        upload = secret_steps[0]
+        self.assertTrue(upload["uses"].startswith("codecov/codecov-action@"))
+        self.assertEqual(upload["with"]["token"], "${{ secrets.CODECOV_TOKEN }}")
+        self.assertEqual(upload["with"]["slug"], "barneyonline/ha-homepod-sensor-link")
+        versions = json.loads((ROOT / "devtools/validation.json").read_text())["home_assistant"]
+        self.assertEqual(
+            upload["with"]["files"].split(","), [f"coverage/{version}/coverage.xml" for version in versions]
+        )
+        for option in ("disable_search", "disable_file_fixes", "disable_safe_directory", "fail_ci_if_error"):
+            self.assertEqual(upload["with"][option], "true")
+        self.assertEqual(upload["with"]["plugins"], "noop")
+        self.assertNotIn("skip_validation", upload["with"])
+        self.assertNotIn("use_oidc", upload["with"])
+        download = next(step for step in job["steps"] if step["uses"].startswith("actions/download-artifact@"))
+        self.assertEqual(
+            download["with"], {"name": "homepod-link-coverage-${{ github.run_attempt }}", "path": "coverage"}
+        )
+        self.assertTrue(all("uses" in step and "run" not in step for step in job["steps"]))
+        settings = yaml.safe_load((ROOT / "codecov.yml").read_text())
+        for status in ("project", "patch"):
+            self.assertEqual(settings["coverage"]["status"][status]["default"], {"target": "100%", "threshold": "0%"})
+        self.assertFalse(settings["comment"])
 
     def test_community_forms_parse_and_never_request_secret_attachments(self):
         for path in (ROOT / ".github/ISSUE_TEMPLATE").glob("*.yml"):

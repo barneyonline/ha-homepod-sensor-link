@@ -7,8 +7,8 @@ Date: 8 November 2026 (Australia/Melbourne). HomePod Sensor Link, domain `homepo
 | Check | Observed result |
 |---|---|
 | Supplied baseline before development | 62 tests passed on HA 2026.11.0 |
-| Final HA 2026.10.0 matrix | 189 tests passed |
-| Final HA 2026.11.0 matrix | 189 tests passed |
+| Current HA 2026.10.0 matrix | 190 tests passed |
+| Current HA 2026.11.0 matrix | 190 tests passed |
 | Host content/Git scanner/package tests | 12 tests passed |
 | Host repository tooling tests | 10 tests passed |
 | Integration Python coverage | All 18 modules: 100% statements and branches, zero missing/excluded lines or branches |
@@ -19,7 +19,7 @@ Date: 8 November 2026 (Australia/Melbourne). HomePod Sensor Link, domain `homepo
 | Quality evidence | All 54 targets audited: 49 done locally, 3 scoped exemptions, 2 external todos; four release evidence gates pending |
 | Hosted GitHub Actions | First published implementation passed [run 42424449553](https://github.com/barneyonline/ha-homepod-sensor-link/actions/runs/42424449553) on commit `3b4c407`: complete two-version validation and coverage artifacts |
 | Strict Platinum/release readiness | Intentionally refused while external requirements remain unverified |
-| Repository contracts | Naming/version/matrix/action/translation parity, enum labels/icons, source suppression checks, local links and read-only workflow policy |
+| Repository contracts | Naming/version/matrix/action/translation parity, enum labels/icons, source suppression checks, local links, read-only repository permissions and isolated trusted-main Codecov reporting |
 | Local wiki | 22 generated pages including sidebar match canonical sources |
 | Working-file public-content audit | Passed, including hidden source files |
 | Strict actual Git audit | Existing GitHub history preserved; current files/index/reachable commits scanned before upload; earlier `2d5e069` remains unverified |
@@ -44,6 +44,6 @@ HA 2026.10 lacks the Repairs entry-link parameter available in 2026.11. The adap
 
 The original source folder arrived without `.git`. Publication attaches the existing GitHub repository history and preserves its initial commit. Current files, staged content and all reachable commits are scanned before upload. The earlier development baseline `2d5e069` is still unavailable and cannot be authenticated. No replacement ancestry is claimed; the pre-publication source snapshot was preserved outside the repository.
 
-Source publication is complete on the existing public GitHub repository, and its first hosted validation passed. Review GitHub Actions for results on later commits. Codecov connection, a separate published GitHub Wiki, a release, HACS acceptance and upstream branding acceptance remain unperformed. Private vulnerability reporting is not configured. The read-only workflow's manual Platinum/release modes refuse incomplete evidence.
+Source publication is complete on the existing public GitHub repository, and its first hosted validation passed. Review GitHub Actions for results on later commits. Codecov reporting is configured in a separate trusted-main job using the repository secret; successful upload and service-side processing are separate from local validation. A separate published GitHub Wiki, a release, HACS acceptance and upstream branding acceptance remain unperformed. Private vulnerability reporting is not configured. The workflow's manual Platinum/release modes refuse incomplete evidence.
 
 The controller-extraction guide is a primary-source-researched candidate. Actual modern backup record availability, intact key export, hardware/firmware interoperability, User access and full setup/recovery/removal still require separately authorised evidence through the existing 1Password workflow. No real backup, keychain, HomePod, credential or live HA system was accessed. [Quality target](Quality-and-Readiness.md) records the distinction between local gates and official/external acceptance.

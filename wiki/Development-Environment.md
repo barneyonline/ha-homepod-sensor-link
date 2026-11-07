@@ -50,4 +50,8 @@ The Git audit fails when actual metadata is missing. Publication preserves the e
 
 Edit canonical source pages, regenerate `wiki/` with `python3 scripts/build_wiki.py`, then validate. Local links, English/action/entity/issue translations, metadata and generated-page drift are checked.
 
-The read-only workflow runs on the public source repository and supports scheduled/manual checks with `local`, `platinum` and `release` readiness modes. It has no live secrets, publication/deployment steps or wiki push. Dependabot proposes weekly Action updates. Hosted CI has independently passed; releases, separate Wiki publication and HACS/brands/Codecov setup remain distinct outcomes.
+The workflow keeps GitHub repository permissions at `contents: read` and supports scheduled/manual checks with `local`, `platinum` and `release` readiness modes. Validation remains offline and secret-free. There are no device credentials, release/deployment steps or wiki push. Dependabot proposes weekly Action updates.
+
+After validation succeeds, a separate Codecov job downloads this run's coverage artifact and uploads only `coverage.xml` from each HA version. The `CODECOV_TOKEN` secret is scoped to the pinned upload action and is never passed to validation or pull-request runs. Uploads run only on trusted `main`; the job checks out source without persisted Git credentials and executes no repository-authored shell commands. Uploader integrity verification remains enabled. Codecov configuration uses 100% project/patch targets; the exact local per-module and JavaScript gates remain authoritative for every pull request. The public badge reports Python integration coverage, while JavaScript is gated separately.
+
+Hosted CI has independently passed; Codecov report acceptance, releases, separate Wiki publication and HACS/brands acceptance remain distinct outcomes.

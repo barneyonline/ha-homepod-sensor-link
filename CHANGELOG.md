@@ -12,5 +12,6 @@
 - Preserve foreign entity/device links during removal and prevent incomplete storage or failed unloaded reauth from erasing pins or reporting success.
 - Add formatting, community templates, deterministic packaging/checksums and generated local wiki documentation.
 - Prepare public source publication on the existing GitHub history, retain GPL-3.0 and the prior MIT attribution notice, and include the selected theme-aware README banners and local integration branding.
+- Align the README with the other integrations, add live repository/coverage badges, and isolate token-authenticated Codecov uploads to successful trusted-main runs with explicit Python reports.
 
 This entry records development, not a release. Extraction, hardware and supported-distribution gates remain open. Hosted results are available through GitHub Actions. The original development baseline `2d5e069` was not supplied; the existing GitHub initial commit is preserved without inventing the missing ancestry.
