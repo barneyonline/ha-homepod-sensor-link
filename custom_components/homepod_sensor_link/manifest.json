@@ -1,0 +1,29 @@
+{
+  "domain": "homepod_sensor_link",
+  "name": "HomePod Sensor Link",
+  "codeowners": [
+    "@barneyonline"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "homekit_controller",
+    "zeroconf",
+    "http",
+    "frontend",
+    "panel_custom"
+  ],
+  "documentation": "https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/README.md",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/barneyonline/ha-homepod-sensor-link/issues",
+  "single_config_entry": true,
+  "version": "2.0.0",
+  "zeroconf": [
+    {
+      "type": "_hap._tcp.local.",
+      "properties": {
+        "md": "homepod*"
+      }
+    }
+  ]
+}

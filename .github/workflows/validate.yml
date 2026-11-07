@@ -1,0 +1,53 @@
+name: Repository checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      readiness:
+        description: Gate to enforce after local validation
+        type: choice
+        default: local
+        options: [local, platinum, release]
+  schedule:
+    - cron: "23 3 * * 1"
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require full public-content audit
+        run: python3 scripts/check_public_content.py --history --require-git
+      - name: Offline matrix, coverage, repository contracts and formatting
+        id: local_validation
+        env:
+          HSL_REPORT_DIR: ${{ runner.temp }}/homepod-link-validation
+        run: sh scripts/validate.sh
+      - name: Require complete Platinum evidence when requested
+        if: ${{ inputs.readiness == 'platinum' || inputs.readiness == 'release' }}
+        run: >-
+          docker run --rm --network none -v "$PWD:/project:ro" -w /project --entrypoint python
+          homepod-link-quality:2026.11.0 scripts/validate_quality_scale.py --require-complete
+      - name: Require independent release evidence when requested
+        if: ${{ inputs.readiness == 'release' }}
+        run: >-
+          docker run --rm --network none -v "$PWD:/project:ro" -w /project --entrypoint python
+          homepod-link-quality:2026.11.0 scripts/validate_quality_scale.py --require-release-ready
+      - name: Preserve synthetic coverage evidence
+        if: ${{ always() && steps.local_validation.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: homepod-link-coverage-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/homepod-link-validation/
+          if-no-files-found: error
+          retention-days: 7

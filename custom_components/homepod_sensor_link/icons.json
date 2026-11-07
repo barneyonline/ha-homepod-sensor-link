@@ -1,0 +1,9 @@
+{
+  "entity": {
+    "sensor": {
+      "sensor_access": {
+        "default": "mdi:shield-sync"
+      }
+    }
+  }
+}

@@ -1,0 +1,722 @@
+{
+  "target": "platinum",
+  "official_status": "custom",
+  "rules": {
+    "action-setup": {
+      "code": [
+        "custom_components/homepod_sensor_link/__init__.py"
+      ],
+      "tests": [
+        "tests/test_runtime_failures.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Actions are registered during integration setup and survive entry unload; handlers resolve the current runtime."
+    },
+    "appropriate-polling": {
+      "code": [
+        "custom_components/homepod_sensor_link/engine.py",
+        "custom_components/homepod_sensor_link/coordinator.py"
+      ],
+      "tests": [
+        "tests/test_recovery.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Five-minute fresh sessions, bounded concurrency, startup grace and sample staleness are explicit."
+    },
+    "common-modules": {
+      "code": [
+        "custom_components/homepod_sensor_link/coordinator.py",
+        "custom_components/homepod_sensor_link/entity.py",
+        "custom_components/homepod_sensor_link/models.py"
+      ],
+      "tests": [
+        "tests/test_quality_lifecycle.py"
+      ],
+      "docs": [
+        "docs/ARCHITECTURE.md"
+      ],
+      "comment": "Coordinator, shared entity and typed callback/data seams have dedicated modules."
+    },
+    "config-flow": {
+      "code": [
+        "custom_components/homepod_sensor_link/config_flow.py"
+      ],
+      "tests": [
+        "tests/test_flow_lifecycle.py",
+        "tests/test_onboarding_v2.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Actual HA flows cover explicit selection/import, partial results, cancellation and discovery."
+    },
+    "config-flow-test-coverage": {
+      "code": [
+        "custom_components/homepod_sensor_link/config_flow.py"
+      ],
+      "tests": [
+        "tests/test_flow_lifecycle.py",
+        "tests/test_quality_lifecycle.py"
+      ],
+      "docs": [
+        "docs/VALIDATION.md"
+      ],
+      "comment": "The exact per-module gate requires zero uncovered flow statements and branches."
+    },
+    "dependency-transparency": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json",
+        "custom_components/homepod_sensor_link/backend.py"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/QUALITY_RESEARCH.md",
+        "docs/DEPENDENCIES.md"
+      ],
+      "comment": "Tagged aiohomekit source, package provenance and direct/core-provided dependency ownership are recorded; runtime versions are asserted."
+    },
+    "entity-event-setup": {
+      "code": [
+        "custom_components/homepod_sensor_link/sensor.py",
+        "custom_components/homepod_sensor_link/entity.py"
+      ],
+      "tests": [
+        "tests/test_quality_lifecycle.py",
+        "tests/test_onboarding_v2.py"
+      ],
+      "docs": [
+        "docs/ARCHITECTURE.md"
+      ],
+      "comment": "Coordinator subscriptions register unload callbacks and measurement tracking is removed during entity lifecycle cleanup."
+    },
+    "entity-unique-id": {
+      "code": [
+        "custom_components/homepod_sensor_link/sensor.py",
+        "custom_components/homepod_sensor_link/provisioning.py"
+      ],
+      "tests": [
+        "tests/test_onboarding_v2.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Persisted per-device keys determine stable measurement and status unique IDs across retry/restart."
+    },
+    "has-entity-name": {
+      "code": [
+        "custom_components/homepod_sensor_link/sensor.py"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Names are translated with device context; entity naming is enabled."
+    },
+    "runtime-data": {
+      "code": [
+        "custom_components/homepod_sensor_link/coordinator.py",
+        "custom_components/homepod_sensor_link/__init__.py"
+      ],
+      "tests": [
+        "tests/test_runtime_failures.py"
+      ],
+      "docs": [
+        "docs/ARCHITECTURE.md"
+      ],
+      "comment": "HomePodConfigEntry is ConfigEntry[Runtime]; runtime data and coordinator snapshots are typed."
+    },
+    "test-before-configure": {
+      "code": [
+        "custom_components/homepod_sensor_link/config_flow.py",
+        "custom_components/homepod_sensor_link/provisioning.py"
+      ],
+      "tests": [
+        "tests/test_flow_lifecycle.py",
+        "tests/test_durable_edges.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Credential preparation performs bounded read-only authentication and preserves failed/pending results honestly."
+    },
+    "test-before-setup": {
+      "code": [
+        "custom_components/homepod_sensor_link/coordinator.py",
+        "custom_components/homepod_sensor_link/__init__.py"
+      ],
+      "tests": [
+        "tests/test_preflight.py"
+      ],
+      "docs": [
+        "docs/ARCHITECTURE.md"
+      ],
+      "comment": "Read-only preflight precedes platform creation. All-network failure retries; authentication/pin failure stays isolated for guarded recovery/diagnostics."
+    },
+    "unique-config-entry": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json",
+        "custom_components/homepod_sensor_link/config_flow.py",
+        "custom_components/homepod_sensor_link/__init__.py"
+      ],
+      "tests": [
+        "tests/test_onboarding_v2.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Singleton flow identity and an owner claimed before awaits prevent duplicate engines."
+    },
+    "action-exceptions": {
+      "code": [
+        "custom_components/homepod_sensor_link/__init__.py",
+        "custom_components/homepod_sensor_link/strings.json"
+      ],
+      "tests": [
+        "tests/test_preflight.py",
+        "tests/test_runtime_failures.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Unavailable runtime and operational action failures raise controlled translated HA exceptions."
+    },
+    "config-entry-unloading": {
+      "code": [
+        "custom_components/homepod_sensor_link/__init__.py",
+        "custom_components/homepod_sensor_link/coordinator.py"
+      ],
+      "tests": [
+        "tests/test_runtime_completion.py",
+        "tests/test_runtime_failures.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Failed platform unload preserves ownership; successful stop drains tasks and closes transports."
+    },
+    "entity-unavailable": {
+      "code": [
+        "custom_components/homepod_sensor_link/sensor.py"
+      ],
+      "tests": [
+        "tests/test_onboarding_v2.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Measurements require fresh verified samples and valid device lifecycle; diagnostics retain explanatory state."
+    },
+    "log-when-unavailable": {
+      "code": [
+        "custom_components/homepod_sensor_link/coordinator.py",
+        "custom_components/homepod_sensor_link/engine.py"
+      ],
+      "tests": [
+        "tests/test_runtime_failures.py",
+        "tests/test_backend_edges.py"
+      ],
+      "docs": [
+        "docs/TROUBLESHOOTING.md"
+      ],
+      "comment": "Deduplicated controlled failure/recovery transitions omit credentials, identities and raw messages."
+    },
+    "parallel-updates": {
+      "code": [
+        "custom_components/homepod_sensor_link/sensor.py",
+        "custom_components/homepod_sensor_link/engine.py"
+      ],
+      "tests": [
+        "tests/test_onboarding_v2.py"
+      ],
+      "docs": [
+        "docs/ARCHITECTURE.md"
+      ],
+      "comment": "Coordinator entities declare PARALLEL_UPDATES=0; independent peers run concurrently and writes retain per-engine serialization."
+    },
+    "reauthentication-flow": {
+      "code": [
+        "custom_components/homepod_sensor_link/config_flow.py",
+        "custom_components/homepod_sensor_link/coordinator.py",
+        "custom_components/homepod_sensor_link/provisioning.py"
+      ],
+      "tests": [
+        "tests/test_quality_lifecycle.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "A real reauth route uses the local administrator import and preserves both pins, keys and repair history."
+    },
+    "test-coverage": {
+      "code": [
+        "custom_components/homepod_sensor_link/models.py"
+      ],
+      "tests": [
+        "tests/test_tooling.py"
+      ],
+      "docs": [
+        "docs/VALIDATION.md"
+      ],
+      "comment": "Every packaged Python module must have exactly 100% statement and branch coverage on both HA versions; no exclusions or tolerated misses."
+    },
+    "devices": {
+      "code": [
+        "custom_components/homepod_sensor_link/entity.py",
+        "custom_components/homepod_sensor_link/sensor.py"
+      ],
+      "tests": [
+        "tests/test_runtime_completion.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Owned devices carry Apple context and preserve foreign/native registry records; no invented firmware metadata."
+    },
+    "diagnostics": {
+      "code": [
+        "custom_components/homepod_sensor_link/diagnostics.py",
+        "custom_components/homepod_sensor_link/coordinator.py"
+      ],
+      "tests": [
+        "tests/test_preflight.py",
+        "tests/test_onboarding_v2.py"
+      ],
+      "docs": [
+        "SECURITY.md"
+      ],
+      "comment": "Diagnostics return anonymous curated state, including a safe empty result without loaded runtime."
+    },
+    "discovery": {
+      "code": [
+        "custom_components/homepod_sensor_link/onboarding.py",
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_boundary_failures.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "HAP discovery offers HomePod candidates and native adoption without replacing trusted pins."
+    },
+    "discovery-update-info": {
+      "code": [
+        "custom_components/homepod_sensor_link/backend.py"
+      ],
+      "tests": [
+        "tests/test_backend_edges.py"
+      ],
+      "docs": [
+        "docs/ARCHITECTURE.md"
+      ],
+      "comment": "Every fresh session resolves current endpoints and checks the stable accessory pin before trusting the peer."
+    },
+    "dynamic-devices": {
+      "code": [
+        "custom_components/homepod_sensor_link/coordinator.py",
+        "custom_components/homepod_sensor_link/sensor.py"
+      ],
+      "tests": [
+        "tests/test_quality_lifecycle.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Explicitly prepared additional devices are added through coordinator listeners without reloading healthy peers; unselected discoveries are never commissioned."
+    },
+    "entity-category": {
+      "code": [
+        "custom_components/homepod_sensor_link/sensor.py"
+      ],
+      "tests": [
+        "tests/test_onboarding_v2.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Access health is diagnostic; temperature/humidity are primary measurements."
+    },
+    "entity-device-class": {
+      "code": [
+        "custom_components/homepod_sensor_link/sensor.py"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Temperature/humidity have proper sensor classes/units and state class; access health is an enum."
+    },
+    "entity-disabled-by-default": {
+      "code": [
+        "custom_components/homepod_sensor_link/sensor.py"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Only primary measurements and the integration’s essential access-health entity are enabled; optional telemetry is attributes rather than extra enabled entities."
+    },
+    "entity-translations": {
+      "code": [
+        "custom_components/homepod_sensor_link/sensor.py",
+        "custom_components/homepod_sensor_link/strings.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Measurement names and finite access-state labels use translated entity keys."
+    },
+    "exception-translations": {
+      "code": [
+        "custom_components/homepod_sensor_link/strings.json",
+        "custom_components/homepod_sensor_link/__init__.py"
+      ],
+      "tests": [
+        "tests/test_preflight.py"
+      ],
+      "docs": [
+        "docs/TROUBLESHOOTING.md"
+      ],
+      "comment": "Public setup/action errors use translated controlled messages, never raw response/exception text."
+    },
+    "icon-translations": {
+      "code": [
+        "custom_components/homepod_sensor_link/icons.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Access health icon uses the supported entity icon mapping."
+    },
+    "reconfiguration-flow": {
+      "code": [
+        "custom_components/homepod_sensor_link/config_flow.py"
+      ],
+      "tests": [
+        "tests/test_flow_lifecycle.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Reconfiguration supports per-device policy, import, Resume, Cancel and removal without resetting safety history."
+    },
+    "repair-issues": {
+      "code": [
+        "custom_components/homepod_sensor_link/coordinator.py",
+        "custom_components/homepod_sensor_link/__init__.py",
+        "custom_components/homepod_sensor_link/strings.json"
+      ],
+      "tests": [
+        "tests/test_quality_lifecycle.py",
+        "tests/test_preflight.py"
+      ],
+      "docs": [
+        "docs/TROUBLESHOOTING.md"
+      ],
+      "comment": "Credential, sensor access, competing engine and global check failures create actionable translated Repairs; issues survive unload and clear on resolution/removal."
+    },
+    "stale-devices": {
+      "code": [
+        "custom_components/homepod_sensor_link/__init__.py",
+        "custom_components/homepod_sensor_link/coordinator.py"
+      ],
+      "tests": [
+        "tests/test_runtime_completion.py",
+        "tests/test_runtime_failures.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Explicit user removal is supported; mDNS disappearance alone cannot safely prove a stale device."
+    },
+    "async-dependency": {
+      "code": [
+        "custom_components/homepod_sensor_link/backend.py",
+        "custom_components/homepod_sensor_link/vault.py",
+        "custom_components/homepod_sensor_link/coordinator.py"
+      ],
+      "tests": [
+        "tests/test_session_cleanup.py",
+        "tests/test_durable_edges.py"
+      ],
+      "docs": [
+        "docs/DEPENDENCIES.md"
+      ],
+      "comment": "aiohomekit network I/O is asynchronous; blocking protected journal work runs in drained executor jobs."
+    },
+    "strict-typing": {
+      "code": [
+        "custom_components/homepod_sensor_link/models.py",
+        "custom_components/homepod_sensor_link/coordinator.py"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/DEVELOPMENT.md"
+      ],
+      "comment": "Strict mypy checks all packaged modules against the supported HA source, without disabled checks or ignored local errors."
+    },
+    "docs-actions": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-high-level-description": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "README.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-installation-instructions": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-removal-instructions": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-configuration-parameters": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-installation-parameters": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/EXTRACTION.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-data-update": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/SETUP.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-examples": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/AUTOMATIONS.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-known-limitations": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/LIMITATIONS.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-supported-devices": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/LIMITATIONS.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-supported-functions": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/USAGE.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-troubleshooting": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/TROUBLESHOOTING.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-use-cases": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/AUTOMATIONS.md"
+      ],
+      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+    },
+    "docs-conditions": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/QUALITY_RESEARCH.md",
+        "SECURITY.md"
+      ],
+      "comment": "No custom condition platform is supplied."
+    },
+    "docs-triggers": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/QUALITY_RESEARCH.md",
+        "SECURITY.md"
+      ],
+      "comment": "No custom trigger platform is supplied; ordinary automation examples use HA state/time triggers."
+    },
+    "inject-websession": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/QUALITY_RESEARCH.md",
+        "SECURITY.md"
+      ],
+      "comment": "Encrypted HAP uses custom asyncio socket framing; aiohomekit has no aiohttp/httpx session injection API. HA AsyncZeroconf is injected; revisit if an outbound HTTP client is added."
+    },
+    "brands": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/QUALITY_RESEARCH.md",
+        "SECURITY.md"
+      ],
+      "comment": "Accepted upstream Home Assistant branding requires a separately authorised public submission and acceptance. Local artwork does not prove acceptance."
+    },
+    "integration-owner": {
+      "code": [
+        "custom_components/homepod_sensor_link/manifest.json"
+      ],
+      "tests": [
+        "tests/test_repository_contracts.py"
+      ],
+      "docs": [
+        "docs/QUALITY_RESEARCH.md",
+        "SECURITY.md"
+      ],
+      "comment": "The proposed @barneyonline metadata follows the user’s existing repositories; public support commitment and a real private security reporting route still require confirmation before distribution."
+    }
+  },
+  "release_gates": {
+    "git-provenance": {
+      "status": "pending",
+      "comment": "Existing GitHub initial commit is preserved and current files/index/reachable history are scanned. Earlier development baseline 2d5e069 remains unavailable; do not fabricate ancestry."
+    },
+    "controller-extraction": {
+      "status": "pending",
+      "comment": "Authorised real encrypted-backup export and exact record format need proof."
+    },
+    "hardware": {
+      "status": "pending",
+      "comment": "Authorised HomePod setup, User access, preservation, restart/recovery/removal need proof through the existing 1Password workflow."
+    },
+    "hosted-ci": {
+      "status": "pending",
+      "comment": "The public source repository and read-only workflow are configured. A successful hosted run must be independently recorded; local results alone are insufficient."
+    },
+    "distribution": {
+      "status": "pending",
+      "comment": "Public source publication is authorised and project/issue URLs are real. Private reporting, HACS, Codecov and upstream branding acceptance remain separate requirements."
+    }
+  }
+}

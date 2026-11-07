@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: repository-contracts
+        name: Documentation, translation and metadata contracts
+        entry: python3 scripts/check_repository.py
+        language: system
+        pass_filenames: false
+      - id: wiki-current
+        name: Generated wiki matches source pages
+        entry: python3 scripts/build_wiki.py --check
+        language: system
+        pass_filenames: false
+      - id: offline-validation
+        name: Pinned offline Docker validation
+        entry: sh scripts/validate.sh
+        language: system
+        pass_filenames: false

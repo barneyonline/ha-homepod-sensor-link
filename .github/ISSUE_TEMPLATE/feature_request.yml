@@ -1,0 +1,27 @@
+name: Feature or documentation request
+description: Explain the problem a change would solve
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, device identities, addresses, household configuration or private exports.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Discovery and onboarding
+        - Measurements and monitoring
+        - Recovery and lifecycle
+        - Documentation and automations
+        - Tests and developer tooling
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and proposed behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

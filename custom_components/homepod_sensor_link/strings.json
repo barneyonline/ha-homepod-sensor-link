@@ -1,0 +1,151 @@
+{
+  "title": "HomePod Sensor Link",
+  "config": {
+    "step": {
+      "user": {
+        "title": "HomePod Sensor Link",
+        "description": "Discover HomePod sensors, import authorised controller credentials, and set up sensor access."
+      },
+      "devices": {
+        "title": "Select HomePods",
+        "description": "Discovery supplies candidates and network endpoints. Authentication verifies their pinned identities. Existing native entries are adopted without changing their entities.",
+        "data": {
+          "devices": "HomePods"
+        }
+      },
+      "policy": {
+        "title": "Recovery per HomePod",
+        "description": "Recovery is selected by default. It requires a verified administrator credential for each selected device. Clear a device to use monitoring only.",
+        "data": {
+          "recovery_devices": "Enable automatic recovery for"
+        }
+      },
+      "credentials": {
+        "title": "Import controller credentials",
+        "description": "[Open the local administrator import page]({import_url}) in another tab, choose a selected HAP CSV or JSON export, then return here and Continue. No pairing is changed by the upload. Extraction must be explicit and authorised; see the extraction guide. Controller keys must never be posted in issues or chat."
+      },
+      "manage": {
+        "title": "Manage a HomePod",
+        "description": "Resume permits a pending pairing write after read-only checks. Cancel pauses all setup activity. Removal deletes this device’s local credentials and recovery history; it does not revoke accessory pairings or remove native entries.",
+        "data": {
+          "device": "HomePod",
+          "action": "Action"
+        }
+      },
+      "reconfigure": {
+        "title": "Configure HomePod Sensor Link",
+        "menu_options": {
+          "devices": "Add or import devices",
+          "manage": "Manage existing devices"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Verify recovery credentials",
+        "description": "Continue from an authenticated local administrator session to re-import the existing pinned controller identity. Reauthentication cannot replace an identity pin or bypass pairing safety limits. Other ready devices keep working."
+      }
+    },
+    "progress": {
+      "verify": "Matching selected HomePods and authorised credentials. Pairing identities are saved before any later provisioning write."
+    },
+    "error": {
+      "discovery_failed": "Discovery could not complete. Retry after checking local connectivity.",
+      "select_devices": "Select one or more discovered or retained devices.",
+      "import_required": "Import credentials in the linked local page before continuing.",
+      "safety_blocked": "Identity or permission validation blocked this device. Investigate the mismatch; Resume cannot replace its pinned identity.",
+      "device_action_failed": "The device action did not complete. Local state was kept or cleanup remains pending. Check protected storage and connectivity before retrying."
+    },
+    "abort": {
+      "local_admin_required": "Use an authenticated Home Assistant administrator on the local network. Cloud and remote imports are not accepted.",
+      "already_configured": "HomePod Sensor Link is already configured. Use Reconfigure to add or manage devices.",
+      "invalid_selection": "The selected device is not part of this setup.",
+      "verification_failed": "No selected device could be prepared. Check the local HAP export, pins and connectivity.",
+      "runtime_unavailable": "Load the integration before managing devices.",
+      "device_updated": "Device settings updated.",
+      "reauth_not_required": "These monitoring-only devices do not need an administrator credential. Use Reconfigure to manage them.",
+      "reauth_successful": "The existing pinned administrator credentials were verified.",
+      "reconfigure_successful": "The selected devices were updated without restarting healthy peers."
+    }
+  },
+  "services": {
+    "check_now": {
+      "name": "Check sensor access now",
+      "description": "Run the normal sensor access check now. Enabled recovery, pending setup and native reloads still require all persisted safeguards; this action does not bypass limits."
+    },
+    "check_recovery_access": {
+      "name": "Check recovery administrator access",
+      "description": "Read-only administrator audit for recovery-enabled devices. Returns anonymous health state without keys or pairing identifiers."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": {
+        "name": "Temperature"
+      },
+      "humidity": {
+        "name": "Humidity"
+      },
+      "sensor_access": {
+        "name": "Sensor access",
+        "state": {
+          "starting": "Starting",
+          "healthy": "Healthy",
+          "authentication_failed": "Authentication failed",
+          "unreachable": "Unreachable",
+          "blocked": "Blocked",
+          "cooldown": "Cooldown",
+          "repairing": "Repairing",
+          "repair_failed": "Repair failed",
+          "native_reload_pending": "Native reload pending",
+          "native_unavailable": "Native unavailable",
+          "paused": "Paused",
+          "prepared": "Prepared",
+          "needs_credentials": "Needs credentials",
+          "write_uncertain": "Write uncertain",
+          "accepted": "Accepted",
+          "verified": "Verified",
+          "active": "Active",
+          "setup_cancelled": "Setup cancelled",
+          "removed": "Removed"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "not_loaded": {
+      "message": "HomePod Sensor Link is not loaded. Load the integration before running this action."
+    },
+    "check_failed": {
+      "message": "The HomePod check could not complete. Review the Sensor access diagnostic and Repairs. No limits were bypassed."
+    },
+    "unreachable": {
+      "message": "All configured HomePods are unreachable. Check local connectivity; Home Assistant will retry setup."
+    },
+    "unsupported_configuration": {
+      "message": "This configuration version is unsupported. Use a fresh HomePod Sensor Link entry."
+    },
+    "engine_conflict": {
+      "message": "Another recovery engine is configured or still running. Resolve the competing integration before retrying."
+    },
+    "setup_failed": {
+      "message": "HomePod setup or protected data validation failed. Check the private storage and configured identity pins; no pairing changes were authorised."
+    }
+  },
+  "issues": {
+    "sensor_access": {
+      "title": "HomePod sensor access needs attention",
+      "description": "A monitored HomePod could not verify sensor access. Check the Sensor access diagnostic and Reconfigure this integration. Identity or permission mismatches require investigation; Resume does not replace a pinned identity. Network failures never authorise pairing changes."
+    },
+    "administrator_access": {
+      "title": "HomePod recovery administrator access needs attention",
+      "description": "A recovery-enabled HomePod could not verify its pinned administrator credential. Sensor access may still work. Use Reconfigure to review the device and re-import the same authorised identity if needed. A read-only audit retries in one hour; this audit changes no pairings."
+    },
+    "checks_unavailable": {
+      "title": "HomePod monitoring could not complete",
+      "description": "Check the integration’s protected storage and local connectivity, then reload the integration. Keep existing credential files and safety history intact. Do not make permissions public or remove identity pins to bypass the failure."
+    },
+    "engine_conflict": {
+      "title": "Another HomePod recovery engine is configured",
+      "description": "Use only one recovery engine. Stop or disable the conflicting helper through its own supported process, then retry HomePod Sensor Link setup. Old credentials and state are never migrated or removed by this integration."
+    }
+  }
+}

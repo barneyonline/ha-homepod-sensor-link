@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible setup, sensor or recovery problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share sanitised evidence only. Never attach controller keys, pairing exports, backups, HA storage, addresses, device/controller IDs or unreviewed logs. Do not report a security vulnerability publicly; see SECURITY.md for the reporting boundary.
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version and installation type
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: HomePod model
+      options:
+        - HomePod mini
+        - HomePod (2nd generation)
+        - Other or unknown
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: HomePod software version
+  - type: dropdown
+    id: ownership
+    attributes:
+      label: Sensor ownership
+      options:
+        - Existing native HomeKit Device entry
+        - New HomePod Sensor Link measurements
+        - Setup pending or unknown
+  - type: dropdown
+    id: recovery
+    attributes:
+      label: Automatic recovery for the affected device
+      options:
+        - Enabled
+        - Disabled
+        - Not yet configured
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and expected/actual behaviour
+      description: Include controlled diagnostic status/error categories, without raw payloads or credentials.
+    validations:
+      required: true

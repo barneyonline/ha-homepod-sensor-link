@@ -1,0 +1,4 @@
+**
+!devtools/
+!devtools/Dockerfile
+!devtools/requirements-quality.txt
