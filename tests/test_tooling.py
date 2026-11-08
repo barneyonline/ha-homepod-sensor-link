@@ -65,6 +65,30 @@ class CoverageGateTests(unittest.TestCase):
 
 
 class DocumentationGateTests(unittest.TestCase):
+    def test_repository_only_guides_keep_working_links_without_becoming_wiki_pages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, exported = (Path(directory) / name for name in ("source", "export"))
+            (root / "guides").mkdir(parents=True)
+            source = root / "source.md"
+            source.write_text("# Start\n\n[Evidence](guides/evidence.md#results)\n")
+            (root / "guides/evidence.md").write_text("# Evidence\n\n## Results\n")
+            with (
+                patch("scripts.build_wiki.PAGES", {"Home": "source.md"}),
+                patch("scripts.build_wiki.REPOSITORY_DOCS", {"guides/evidence.md"}),
+            ):
+                build(root)
+                self.assertIn("(../guides/evidence.md#results)", (root / "wiki/Home.md").read_text())
+                build(root, github=True, output=exported)
+                self.assertIn(
+                    "https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/guides/evidence.md#results",
+                    (exported / "Home.md").read_text(),
+                )
+                self.assertEqual({p.name for p in exported.glob("*.md")}, {"Home.md", "_Sidebar.md"})
+                self.assertNotIn("Evidence", (exported / "_Sidebar.md").read_text())
+                source.write_text("[Unknown](not-approved.md)\n")
+                with self.assertRaisesRegex(ValueError, "Unmapped wiki link"):
+                    build(root)
+
     def test_every_repository_page_has_a_complete_theme_pair(self):
         assets = banners(ROOT)
         self.assertEqual(set(assets), {f"{page}-{theme}.jpg" for page in PAGES for theme in ("dark", "light")})

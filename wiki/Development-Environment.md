@@ -33,7 +33,7 @@ Strict typing uses the image built by full validation:
 docker run --rm --network none -v "$PWD:/project:ro" -w /project --entrypoint mypy homepod-link-quality:2026.11.0 --cache-dir /tmp/homepod-link-mypy custom_components/homepod_sensor_link
 ```
 
-The image exposes the actual HA source through `MYPYPATH`. It checks every packaged module with strict options and no blanket missing-import suppression, disabled errors or excluded modules. Dynamic HAP/storage dictionaries are validated at boundaries; lifecycle objects, callbacks, collections, readings, config-entry runtime data and coordinator snapshots are typed. Narrow callable casts describe aiohomekit's incompletely annotated public methods. See [dependencies](Dependencies.md).
+The image exposes the actual HA source through `MYPYPATH`. It checks every packaged module with strict options and no blanket missing-import suppression, disabled errors or excluded modules. Dynamic HAP/storage dictionaries are validated at boundaries; lifecycle objects, callbacks, collections, readings, config-entry runtime data and coordinator snapshots are typed. Narrow callable casts describe aiohomekit's incompletely annotated public methods. See [dependencies](../docs/DEPENDENCIES.md).
 
 ## Exact coverage policy
 
@@ -43,7 +43,7 @@ The credential-panel Node suite separately requires **100% lines, branches and f
 
 ## Quality and release gates
 
-The [quality guide](Quality-and-Readiness.md) records all 54 official rule targets. The ordinary audit checks evidence consistency while retaining external todos. These stricter commands intentionally fail until the missing evidence is supplied:
+The [quality guide](../docs/QUALITY.md) records all 54 official rule targets. The ordinary audit checks evidence consistency while retaining external todos. These stricter commands intentionally fail until the missing evidence is supplied:
 
 ```sh
 docker run --rm --network none -v "$PWD:/project:ro" -w /project --entrypoint python homepod-link-quality:2026.11.0 scripts/validate_quality_scale.py --require-complete
@@ -56,14 +56,14 @@ The Git audit fails when actual metadata is missing. Publication preserves the e
 
 Edit canonical source pages, regenerate `wiki/` with `python3 scripts/build_wiki.py`, then validate. Local links, English/action/entity/issue translations, metadata and generated-page drift are checked.
 
-The published GitHub Wiki is the reader-facing documentation; the source pages and portable `wiki/` snapshots remain versioned here. Prepare a separate export with GitHub Wiki page URLs rather than local `.md` links:
+The published GitHub Wiki contains the selected user and developer guides; their source pages and portable `wiki/` snapshots remain versioned here. Contributing, release notes, research, dependencies and quality/validation evidence stay in the repository. Links to those documents resolve to repository files in GitHub exports and portable relative paths in local snapshots. They are not duplicated as Wiki pages. Prepare a separate export with GitHub Wiki page URLs rather than local `.md` links:
 
 ```sh
 python3 scripts/build_wiki.py --github --output /tmp/homepod-link-wiki-export
 python3 scripts/build_wiki.py --github --output /tmp/homepod-link-wiki-export --check
 ```
 
-Every documentation page has light/dark artwork in `docs/images/wiki/`, based on the approved README template. The generator adds a theme-aware `<picture>` header with a light fallback and descriptive alternative text. Local snapshots use portable relative image paths; GitHub exports use raw Wiki image URLs and copy all publication JPEGs into `images/`. The complete theme set and exact exported bytes are checked for drift. Artwork prompts and the page catalogue live beside the assets; manual archives include only the publication JPEGs.
+Every Wiki page has light/dark artwork in `docs/images/wiki/`, based on the approved README template. The generator adds a theme-aware `<picture>` header with a light fallback and descriptive alternative text. Local snapshots use portable relative image paths; GitHub exports use raw Wiki image URLs and copy all publication JPEGs into `images/`. The complete theme set and exact exported bytes are checked for drift. Artwork prompts and the page catalogue live beside the assets; manual archives include only the publication JPEGs.
 
 This command has no network access and does not publish. To publish an authorised update, clone `https://github.com/barneyonline/ha-homepod-sensor-link.wiki.git`, compare and copy only the generated pages and `images/` assets into that checkout, audit its working files/index/history with the public-content checker, and commit/push its existing default branch. Preserve unrelated Wiki content and existing history. Never delete canonical source pages or grant CI write permissions to perform this manual step.
 

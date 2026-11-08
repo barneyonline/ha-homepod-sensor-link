@@ -10,7 +10,7 @@
 
 ## Before starting
 
-Apple sensor hardware support covers HomePod mini and HomePod (2nd generation), software 16.3+. An advertised HomePod name is a discovery hint, not proof of sensor layout, accessory identity or administrator authority. [Research](Research.md) distinguishes documented Apple support from real-device evidence.
+Apple sensor hardware support covers HomePod mini and HomePod (2nd generation), software 16.3+. An advertised HomePod name is a discovery hint, not proof of sensor layout, accessory identity or administrator authority. [Research](../docs/RESEARCH.md) distinguishes documented Apple support from real-device evidence.
 
 Obtain controller credentials explicitly using an authorised process. Read [EXTRACTION.md](Credential-Extraction.md): the graphical encrypted-backup route is a source-researched candidate, not a proven modern HomeKit export workflow. Do not disable OS protections or export a whole keychain into HA. No setup code/QR is treated as an existing administrator identity.
 

@@ -59,76 +59,16 @@
       "motif": "cyan stacked layers and violet connected system nodes"
     },
     {
-      "page": "Quality-and-Readiness",
-      "title": "Quality &\nReadiness",
-      "subtitle": "Engineering targets and evidence gates",
-      "motif": "a cyan checklist with empty boxes and a violet target symbol, no awards"
-    },
-    {
-      "page": "Quality-Research",
-      "title": "Quality\nResearch",
-      "subtitle": "Home Assistant quality rules and evidence",
-      "motif": "a cyan magnifying glass and a violet checklist outline"
-    },
-    {
-      "page": "Dependencies",
-      "title": "Dependencies",
-      "subtitle": "Runtime libraries and development tooling",
-      "motif": "cyan interlocking cubes and a violet chain link"
-    },
-    {
       "page": "Security",
       "title": "Security",
       "subtitle": "Credentials, identity pins and local privacy",
       "motif": "a cyan keyhole and a violet plain shield without a tick"
     },
     {
-      "page": "Validation",
-      "title": "Validation",
-      "subtitle": "Tests, coverage and independent verification",
-      "motif": "cyan code brackets and a violet checklist outline, no numbers or claims"
-    },
-    {
-      "page": "Research",
-      "title": "Protocol\nResearch",
-      "subtitle": "HomeKit protocols and platform boundaries",
-      "motif": "a cyan signal waveform and violet linked protocol nodes"
-    },
-    {
-      "page": "UI-Research",
-      "title": "UI\nResearch",
-      "subtitle": "Config flows and native Home Assistant APIs",
-      "motif": "a cyan application-window outline and violet slider controls, no text"
-    },
-    {
-      "page": "Completion-Boundaries",
-      "title": "Completion\nBoundaries",
-      "subtitle": "Implemented scope and remaining evidence",
-      "motif": "cyan boundary-corner brackets and a violet checklist with empty boxes"
-    },
-    {
-      "page": "Roadmap",
-      "title": "Roadmap",
-      "subtitle": "Next steps and verification priorities",
-      "motif": "a cyan route with three milestones and a violet small flag"
-    },
-    {
       "page": "Repository-Standards",
       "title": "Repository\nStandards",
       "subtitle": "Community conventions and repository quality",
       "motif": "a cyan folder-tree outline and violet code brackets"
-    },
-    {
-      "page": "Contributing",
-      "title": "Contributing",
-      "subtitle": "Make safe, tested changes to the project",
-      "motif": "a cyan pencil and violet branching contribution nodes"
-    },
-    {
-      "page": "Release-Notes",
-      "title": "Release\nNotes",
-      "subtitle": "Development changes and project history",
-      "motif": "a cyan paper stack and a violet history clock, no version labels"
     }
   ]
 }

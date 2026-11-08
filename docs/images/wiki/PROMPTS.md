@@ -1,6 +1,6 @@
 # Wiki banner artwork
 
-Each of the 21 documentation pages has a light and dark banner based on the approved README Smoked Midnight design. The rounded opaque midnight speaker, cyan/violet lighting and external glass tiles form the shared visual template. The heading, subtitle and external pictograms identify each page.
+Each of the 11 Wiki pages has a light and dark banner based on the approved README Smoked Midnight design. The rounded opaque midnight speaker, cyan/violet lighting and external glass tiles form the shared visual template. The heading, subtitle and external pictograms identify each page.
 
 Generated with the built-in OpenAI image generation tool using the corresponding README theme as an editing reference. Full prompts and reference paths are recorded in [prompts.json](prompts.json); [banners.json](banners.json) records the page catalogue. These are illustrative project artwork, not screenshots, Apple assets or evidence of compatibility or certification.
 

@@ -19,4 +19,4 @@
 - The existing GitHub initial commit is preserved and current files/index/reachable history can be audited. The earlier development baseline `2d5e069` was not supplied and remains unverified.
 - Public source hosting does not establish HACS/brands acceptance, extraction proof, a release or real-device verification. Check GitHub Actions for hosted results. Local exact 100% Python/JavaScript coverage, strict typing and hassfest gates pass. Coverage does not verify hardware or award a quality tier; two external Platinum-target rules remain open.
 
-See [validation evidence](Validation.md), [research](Research.md) and [completion boundary](Completion-Boundaries.md).
+See [validation evidence](../docs/VALIDATION.md), [research](../docs/RESEARCH.md) and [completion boundary](../docs/COMPLETION.md).

@@ -16,12 +16,10 @@ This Wiki is the reader-facing documentation for the experimental community inte
 | Check supported boundaries | [Known limitations](LIMITATIONS.md) |
 | Understand credential lifetime and removal | [Security](../SECURITY.md) |
 
-## Development and evidence
+## Development
 
-- [Development environment](DEVELOPMENT.md) and [contribution guide](../CONTRIBUTING.md)
-- [Architecture](ARCHITECTURE.md), [protocol research](RESEARCH.md) and [HA UI research](UI_RESEARCH.md)
-- [Validation evidence](VALIDATION.md), [completion boundaries](COMPLETION.md) and [roadmap](ROADMAP.md)
-- [Quality target and readiness](QUALITY.md), [quality research](QUALITY_RESEARCH.md) and [dependency ownership](DEPENDENCIES.md)
-- [Repository alignment](REPOSITORY_STANDARDS.md) and [release notes](../CHANGELOG.md)
+- [Development environment](DEVELOPMENT.md)
+- [Architecture](ARCHITECTURE.md)
+- [Repository standards](REPOSITORY_STANDARDS.md)
 
-The [source repository](https://github.com/barneyonline/ha-homepod-sensor-link) retains the canonical documentation and generated snapshots so changes can be reviewed and checked. For documentation updates, follow the contribution and development guides. Wiki publication is explicit; CI does not write to the Wiki.
+The [source repository](https://github.com/barneyonline/ha-homepod-sensor-link) retains the canonical documentation, technical evidence and changelog. For documentation updates, follow the [contribution guide](../CONTRIBUTING.md) and development guide. Wiki publication is explicit; CI does not write to the Wiki.
