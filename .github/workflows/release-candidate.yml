@@ -9,7 +9,7 @@ name: Release Candidate (artifact only)
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: candidate-build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   package:

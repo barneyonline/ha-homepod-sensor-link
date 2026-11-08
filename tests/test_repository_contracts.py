@@ -102,6 +102,10 @@ class RepositoryContractTests(unittest.TestCase):
                         self.assertEqual(job["uses"], "./.github/workflows/release-candidate.yml")
                         self.assertNotIn("secrets", job)
                         self.assertNotIn("write", job.get("permissions", {}).values())
+                        builder = yaml.load(
+                            (ROOT / ".github/workflows/release-candidate.yml").read_text(), Loader=yaml.BaseLoader
+                        )
+                        self.assertNotEqual(workflow["concurrency"]["group"], builder["concurrency"]["group"])
                         continue
                     if path.name in metadata:
                         self.assertEqual(name, "metadata")
