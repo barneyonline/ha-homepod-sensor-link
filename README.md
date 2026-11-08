@@ -77,4 +77,4 @@ See [contributing](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/C
 [![License](https://img.shields.io/github/license/barneyonline/ha-homepod-sensor-link)](LICENSE)
 [![Open Issues](https://img.shields.io/github/issues/barneyonline/ha-homepod-sensor-link)](https://github.com/barneyonline/ha-homepod-sensor-link/issues)
 
-GPL-3.0 licensed. Prior MIT attribution is retained in [LICENSES/MIT.txt](LICENSES/MIT.txt).
+GPL-3.0 licensed. See [LICENSE](LICENSE).

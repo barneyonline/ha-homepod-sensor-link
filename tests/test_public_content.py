@@ -219,7 +219,6 @@ class PackagePreflightTests(unittest.TestCase):
                         self.assertEqual(archive.read(banner), (package.ROOT / banner).read_bytes())
                         self.assertIn(f"../{banner}", archive.read(f"wiki/{page}.md").decode())
                 self.assertNotIn("docs/images/wiki/prompts.json", names)
-                self.assertIn("LICENSES/MIT.txt", names)
                 self.assertIn(b"GNU GENERAL PUBLIC LICENSE", archive.read("LICENSE"))
                 self.assertIn("docs/images/readme-banner.svg", names)
                 for theme in ("light", "dark"):

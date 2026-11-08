@@ -8,7 +8,7 @@
 
 # Contributing
 
-Read `docs/SETUP.md`, `docs/EXTRACTION.md`, `docs/ARCHITECTURE.md` and `docs/COMPLETION.md`. Domain/display name: **HomePod Sensor Link** / `homepod_sensor_link`. Repository and local folder: `ha-homepod-sensor-link`. The project uses GPL-3.0; the earlier MIT notice is retained under `LICENSES/` for attribution.
+Read `docs/SETUP.md`, `docs/EXTRACTION.md`, `docs/ARCHITECTURE.md` and `docs/COMPLETION.md`. Domain/display name: **HomePod Sensor Link** / `homepod_sensor_link`. Repository and local folder: `ha-homepod-sensor-link`. The project uses GPL-3.0; see `LICENSE`.
 
 The final design owns new sensor entities, adopts existing native entries without mutation, defaults recovery on per device, permits local/admin HTTP input without an acknowledgement, and automatically deletes owned credentials/history on removal. Do not reintroduce a legacy compatibility package, storage migration or retained-data purge flow. Preserve conflict detection and native measurement identities/history.
 

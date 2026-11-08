@@ -19,7 +19,7 @@
 - Register translated actions independently of entry load, add same-pin reauthentication, dynamic selected-device entities, read-only startup preflight and persistent actionable Repairs.
 - Preserve foreign entity/device links during removal and prevent incomplete storage or failed unloaded reauth from erasing pins or reporting success.
 - Add formatting, community templates, deterministic packaging/checksums and generated local wiki documentation.
-- Prepare public source publication on the existing GitHub history, retain GPL-3.0 and the prior MIT attribution notice, and include the selected theme-aware README banners and local integration branding.
+- Prepare public source publication on the existing GitHub history, use GPL-3.0, and include the selected theme-aware README banners and local integration branding.
 - Align the README with the other integrations, add live repository/coverage badges, and isolate token-authenticated Codecov uploads to successful trusted-main runs with explicit Python reports.
 - Publish the reader-facing documentation to GitHub Wiki, retain versioned source/snapshots, and export Wiki-native navigation without changing CI write permissions.
 - Add 21 page-specific light/dark Wiki banner pairs based on the approved README artwork, with automatic theme selection, portable offline assets and checked publication exports.
