@@ -50,6 +50,7 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["errors"], {"base": "discovery_failed"})
                 self.assertIn(self.target["accessory_id"], flow._discovered)
                 self.assertNotIn("active-accessory", flow._discovered)
+                self.assertEqual(result["data_schema"]({})["devices"], [self.target["accessory_id"]])
             result = await flow.async_step_devices({"devices": ["not-discovered"]})
             self.assertEqual(result["errors"], {"base": "select_devices"})
             flow._selected = [self.target["accessory_id"]]
@@ -57,6 +58,45 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 (await flow.async_step_policy({"recovery_devices": ["unselected"]}))["reason"], "invalid_selection"
             )
             self.assertEqual((await flow.async_step_credentials({}))["errors"], {"base": "import_required"})
+
+    async def test_all_discovered_devices_start_selected_and_can_be_deselected(self):
+        found = {f"disposable-{index}": {"name": f"HomePod {index}"} for index in range(4)}
+        for source in ("user", "reconfigure"):
+            with self.subTest(source=source):
+                flow = self.flow(source)
+                async with self.flow_environment():
+                    with patch.object(flow_module, "discover_devices", AsyncMock(return_value=found)):
+                        result = await flow.async_step_devices()
+                        self.assertEqual(result["data_schema"]({})["devices"], list(found))
+                        selected = ["disposable-1", "disposable-3"]
+                        policy = await flow.async_step_devices({"devices": selected})
+                        self.assertEqual(policy["step_id"], "policy")
+                        self.assertEqual(flow._selected, selected)
+                        self.assertEqual(policy["data_schema"]({})["recovery_devices"], selected)
+
+    async def test_invalid_device_submission_preserves_available_selection(self):
+        found = {"first": {"name": "First HomePod"}, "second": {"name": "Second HomePod"}}
+        async with self.flow_environment():
+            with patch.object(flow_module, "discover_devices", AsyncMock(return_value=found)):
+                for submitted, expected in (
+                    ({"devices": []}, []),
+                    ({}, []),
+                    ({"devices": ["second", "no-longer-discovered"]}, ["second"]),
+                    ({"devices": ["second", "second"]}, ["second"]),
+                ):
+                    with self.subTest(submitted=submitted):
+                        result = await self.flow().async_step_devices(submitted)
+                        self.assertEqual(result["errors"], {"base": "select_devices"})
+                        self.assertEqual(result["data_schema"]({})["devices"], expected)
+
+    async def test_empty_discovery_has_empty_default_and_can_retry(self):
+        flow = self.flow()
+        async with self.flow_environment():
+            with patch.object(flow_module, "discover_devices", AsyncMock(return_value={})):
+                result = await flow.async_step_devices()
+                self.assertEqual(result["data_schema"]({})["devices"], [])
+            result = await flow.async_step_devices()
+            self.assertEqual(result["data_schema"]({})["devices"], [self.target["accessory_id"]])
 
     async def test_monitor_only_native_setup_needs_no_export(self):
         target, source_entry = fixture()

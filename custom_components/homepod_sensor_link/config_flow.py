@@ -113,17 +113,26 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._discovered.pop(record["target"]["accessory_id"], None)
                 continue
             self._discovered.setdefault(record["target"]["accessory_id"], {"name": record.get("name", "HomePod")})
-        if user_input:
+        if user_input is not None:
             selected = user_input.get("devices", [])
             if selected and len(set(selected)) == len(selected) and set(selected) <= self._discovered.keys():
                 self._selected = selected
                 return await self.async_step_policy()
             errors["base"] = "select_devices"
+        default = (
+            list(self._discovered)
+            if user_input is None
+            else list(dict.fromkeys(key for key in user_input.get("devices", []) if key in self._discovered))
+        )
         return self.async_show_form(
             step_id="devices",
             errors=errors,
             data_schema=vol.Schema(
-                {vol.Required("devices"): choices({k: v["name"] for k, v in self._discovered.items()}, True)}
+                {
+                    vol.Required("devices", default=default): choices(
+                        {k: v["name"] for k, v in self._discovered.items()}, True
+                    )
+                }
             ),
         )
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Select all discovered or resumable HomePods by default during setup and reconfiguration. Preserve the available submitted selection when correcting a validation error.
+
 ## 0.1.0 — 2026-11-08
 
 First experimental release of **HomePod Sensor Link** for **Home Assistant 2026.11.0 or newer**.
