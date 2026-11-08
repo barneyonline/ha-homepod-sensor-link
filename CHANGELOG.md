@@ -16,5 +16,6 @@
 - Publish the reader-facing documentation to GitHub Wiki, retain versioned source/snapshots, and export Wiki-native navigation without changing CI write permissions.
 - Add page-specific light/dark Wiki banner pairs based on the approved README artwork, with automatic theme selection, portable offline assets and checked publication exports.
 - Focus the Wiki on user and development guides, with contribution instructions, changelog and technical evidence maintained in the repository.
+- Add the applicable Enphase-style HACS, current hassfest, spelling/actionlint, quality, metadata-maintenance and read-only development-artifact workflows; retain isolated coverage reporting and prohibit release/deployment publishing.
 
 This entry records development, not a release. Extraction, hardware and supported-distribution gates remain open. Hosted results are available through GitHub Actions. The original development baseline `2d5e069` was not supplied; the existing GitHub initial commit is preserved without inventing the missing ancestry.

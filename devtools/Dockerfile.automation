@@ -1,0 +1,5 @@
+FROM python:3.14-slim@sha256:af8a5aa14780025dbfbcfbc81bd8a91ebd87711dd5b0f48ed71090949dd7cb1d
+COPY devtools/requirements-automation.txt /tmp/requirements-automation.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-automation.txt
+WORKDIR /project
+ENV PYTHONDONTWRITEBYTECODE=1

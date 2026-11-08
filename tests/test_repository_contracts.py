@@ -81,16 +81,40 @@ class RepositoryContractTests(unittest.TestCase):
             for field in ("name", "description"):
                 self.assertEqual(actions[name][field], strings[name][field])
 
-    def test_workflows_are_bounded_read_only_and_pin_external_actions(self):
+    def test_workflows_isolate_trusted_metadata_writes_and_pin_external_actions(self):
+        metadata = {
+            "auto_assign.yml",
+            "auto_assign_new_issues.yml",
+            "auto_label_issues.yml",
+            "comment_missing_diagnostics.yml",
+        }
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             text = path.read_text()
             workflow = yaml.load(text, Loader=yaml.BaseLoader)
             with self.subTest(workflow=path.name):
                 self.assertEqual(workflow["permissions"], {"contents": "read"})
-                self.assertNotIn("pull_request_target", workflow["on"])
+                if "pull_request_target" in workflow["on"]:
+                    self.assertEqual(path.name, "auto_assign.yml")
                 self.assertNotIn("workflow_run", workflow["on"])
-                self.assertNotIn(": write", text)
                 for name, job in workflow["jobs"].items():
+                    if "uses" in job:
+                        self.assertEqual(path.name, "release-assets.yml")
+                        self.assertEqual(job["uses"], "./.github/workflows/release-candidate.yml")
+                        self.assertNotIn("secrets", job)
+                        self.assertNotIn("write", job.get("permissions", {}).values())
+                        continue
+                    if path.name in metadata:
+                        self.assertEqual(name, "metadata")
+                        permissions = {"contents": "read", "issues": "write"}
+                        if path.name == "auto_assign.yml":
+                            permissions["pull-requests"] = "write"
+                        self.assertEqual(job["permissions"], permissions)
+                        self.assertIn("github.repository == 'barneyonline/ha-homepod-sensor-link'", job["if"])
+                        self.assertEqual(job["steps"][0]["with"]["ref"], "main")
+                        self.assertNotIn("github.event.pull_request.head", json.dumps(job))
+                        self.assertNotIn("github.head_ref", json.dumps(job))
+                    else:
+                        self.assertNotIn("write", job.get("permissions", {}).values())
                     if name != "codecov":
                         self.assertNotIn("secrets.", json.dumps(job))
                     self.assertLessEqual(int(job["timeout-minutes"]), 15)

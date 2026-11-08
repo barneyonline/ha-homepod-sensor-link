@@ -2,3 +2,6 @@
 !devtools/
 !devtools/Dockerfile
 !devtools/requirements-quality.txt
+!devtools/Dockerfile.automation
+!devtools/requirements-automation.txt
+!devtools/Dockerfile.hacs

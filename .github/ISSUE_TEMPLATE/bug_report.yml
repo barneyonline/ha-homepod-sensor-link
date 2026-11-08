@@ -55,3 +55,22 @@ body:
       description: Include controlled diagnostic status/error categories, without raw payloads or credentials.
     validations:
       required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Discovery and onboarding
+        - Measurements and monitoring
+        - Recovery and lifecycle
+        - Documentation and automations
+        - Tests and developer tooling
+  - type: dropdown
+    id: diagnostics
+    attributes:
+      label: Sanitised diagnostic evidence
+      description: Never attach keys, pairing exports, backups, storage, addresses, identities or unreviewed logs.
+      options:
+        - Need help preparing safe evidence
+        - Provided below after privacy review
+        - Not available

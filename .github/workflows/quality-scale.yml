@@ -1,0 +1,26 @@
+name: Quality Scale
+'on':
+  push:
+    branches:
+    - main
+  pull_request: {}
+  workflow_dispatch: {}
+  schedule:
+  - cron: 43 4 * * 1
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Audit evidence without claiming external readiness
+      run: docker run --rm --network none -v "$PWD:/project:ro" -w /project --entrypoint python ghcr.io/home-assistant/home-assistant:2026.11.0
+        scripts/validate_quality_scale.py

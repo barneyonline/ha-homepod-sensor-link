@@ -1,0 +1,32 @@
+name: Validate with HACS
+'on':
+  push:
+    branches:
+    - main
+  pull_request: {}
+  workflow_dispatch: {}
+  schedule:
+  - cron: 43 4 * * 1
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Build pinned upstream validator on HA 2026.10.0
+      run: docker build --file devtools/Dockerfile.hacs --tag homepod-link-hacs .
+    - name: Validate repository with HACS
+      env:
+        INPUT_GITHUB_TOKEN: ${{ github.token }}
+        INPUT_CATEGORY: integration
+      run: docker run --rm --env INPUT_GITHUB_TOKEN --env INPUT_CATEGORY --env GITHUB_REPOSITORY --env GITHUB_ACTOR --env
+        GITHUB_EVENT_PATH=/github/workflow/event.json --env GITHUB_WORKSPACE=/github/workspace --volume "$GITHUB_EVENT_PATH:/github/workflow/event.json:ro"
+        --volume "$GITHUB_WORKSPACE:/github/workspace:ro" homepod-link-hacs

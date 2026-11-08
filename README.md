@@ -71,6 +71,9 @@ See [contributing](https://github.com/barneyonline/ha-homepod-sensor-link/blob/m
 </details>
 
 [![Checks](https://img.shields.io/github/actions/workflow/status/barneyonline/ha-homepod-sensor-link/validate.yml?branch=main&label=checks)](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/validate.yml)
+[![HACS validation](https://img.shields.io/github/actions/workflow/status/barneyonline/ha-homepod-sensor-link/hacs.yml?branch=main&label=HACS)](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/hacs.yml)
+[![Hassfest](https://img.shields.io/github/actions/workflow/status/barneyonline/ha-homepod-sensor-link/hassfest.yml?branch=main&label=hassfest)](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/hassfest.yml)
+[![Spelling and workflows](https://img.shields.io/github/actions/workflow/status/barneyonline/ha-homepod-sensor-link/codespell.yml?branch=main&label=spelling%20%26%20workflows)](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/codespell.yml)
 [![Codecov — Python integration](https://codecov.io/gh/barneyonline/ha-homepod-sensor-link/branch/main/graph/badge.svg)](https://app.codecov.io/gh/barneyonline/ha-homepod-sensor-link)
 [![Quality target](https://img.shields.io/badge/quality_target-Platinum-blue)](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/docs/QUALITY.md)
 [![Stars](https://img.shields.io/github/stars/barneyonline/ha-homepod-sensor-link)](https://github.com/barneyonline/ha-homepod-sensor-link/stargazers)

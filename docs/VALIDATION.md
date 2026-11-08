@@ -5,20 +5,23 @@ Date: 8 November 2026 (Australia/Melbourne). HomePod Sensor Link, domain `homepo
 | Check | Observed result |
 |---|---|
 | Supplied baseline before development | 62 tests passed on HA 2026.11.0 |
-| Current HA 2026.10.0 matrix | 196 tests passed |
-| Current HA 2026.11.0 matrix | 196 tests passed |
-| Host content/Git scanner/package tests | 12 tests passed |
+| Current HA 2026.10.0 matrix | 202 tests passed |
+| Current HA 2026.11.0 matrix | 202 tests passed |
+| Host content/Git scanner/package tests | 13 tests passed |
 | Host repository tooling tests | 16 tests passed |
+| Development-artifact integrity | 5 host tests: exact clean source, checksum, scope, unsafe ZIP entries and foreign-component rejection |
+| Metadata automation | 9 Node tests: read-only manual preview, controlled labels, trusted maintainer assignment/review, forged comment markers and safe error reporting |
+| Spelling and workflow syntax | Codespell 2.4.3 and actionlint 1.7.12; maintained sources and all 11 workflow definitions |
 | Integration Python coverage | All 18 modules: 100% statements and branches, zero missing/excluded lines or branches |
 | Credential-panel JavaScript | 5 Node behavior tests; 100% lines, branches and functions; syntax check passed |
 | Strict typing | mypy 2.3.1, all 18 integration modules, HA 2026.11.0/Python 3.14; no local suppressions or blanket missing-import ignore |
 | Python lint and formatting | Ruff 0.14.1 `E4,E7,E9,F` and formatter checks passed |
-| Upstream hassfest | Pinned 2026.10.4 image: manifest, discovery, icons, translations, actions and quality-scale metadata validation |
+| Upstream hassfest | Pinned 2026.10.4 runtime gate; freshly pulled current 2026.11.0 metadata rules also passed independently |
 | Quality evidence | All 54 targets audited: 49 done locally, 3 scoped exemptions, 2 external todos; four release evidence gates pending |
 | Hosted GitHub Actions | First published implementation passed [run 42424449553](https://github.com/barneyonline/ha-homepod-sensor-link/actions/runs/42424449553) on commit `3b4c407`: complete two-version validation and coverage artifacts |
 | Codecov reporting | [Run 42425887513](https://github.com/barneyonline/ha-homepod-sensor-link/actions/runs/42425887513) passed validation and the isolated upload job on `a76f130`; public badge reports 100%, with successful project/patch checks |
 | Strict Platinum/release readiness | Intentionally refused while external requirements remain unverified |
-| Repository contracts | Naming/version/matrix/action/translation parity, enum labels/icons, source suppression checks, local links, read-only repository permissions and isolated trusted-main Codecov reporting |
+| Repository contracts | Naming/version/matrix/action/translation parity, enum labels/icons, source suppression checks, local links, read-only CI/artifacts, isolated trusted-main metadata jobs and Codecov reporting |
 | Local wiki | 12 generated pages including sidebar match canonical sources; all 11 Wiki pages have complete light/dark banner pairs and export drift checks |
 | Published GitHub Wiki | 11 documentation pages and custom sidebar; native page links/anchors, preserved source snapshots and existing Wiki history |
 | Working-file public-content audit | Passed, including hidden source files |

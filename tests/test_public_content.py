@@ -2,10 +2,18 @@
 
 import unittest
 
-from scripts.check_public_content import scan_path, scan_text
+from scripts.check_public_content import PUBLIC_IMAGE_PINS, scan_path, scan_text
 
 
 class PublicContentTests(unittest.TestCase):
+    def test_only_exact_verified_public_image_references_are_exempted(self):
+        for reference in PUBLIC_IMAGE_PINS:
+            with self.subTest(image=reference.split("@")[0]):
+                self.assertEqual(scan_text("FROM " + reference), [])
+                self.assertIn((1, "literal-key-material"), scan_text(reference.split("sha256:")[1]))
+                self.assertIn((1, "literal-key-material"), scan_text(reference + " key=" + "ab" * 32))
+        self.assertIn((1, "literal-key-material"), scan_text("ghcr.io/hacs/action@sha256:" + "ab" * 32))
+
     def test_documentation_address_is_allowed(self):
         self.assertEqual(scan_text("example endpoint 192.0.2.18"), [])
 

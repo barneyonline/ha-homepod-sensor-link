@@ -24,13 +24,29 @@ RULES = {
 FORBIDDEN_PARTS = {".storage", "exports", "backups", "diagnostics", "outputs", "work", "logs"}
 FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".zip", ".log"}
 
+# Exact public registry digests verified for workflow tooling on 8 November 2026.
+# Only complete references are recognised; unknown digests and bare hashes still fail.
+PUBLIC_IMAGE_PINS = {
+    "python:3.14-slim@sha256:" + "af8a5aa14780025dbfbcfbc81bd8a91e" + "bd87711dd5b0f48ed71090949dd7cb1d",
+    "ghcr.io/hacs/action@sha256:" + "a0336b447da4500204122cabea01cac1" + "e0992840d8b927535782ddd5b601f698",
+    "ghcr.io/home-assistant/home-assistant@sha256:"
+    + "1b64d38f38d922bf9d59336451fd6453"
+    + "e1d614f934456af4ee3d2a51061be3a4",
+    "rhysd/actionlint@sha256:" + "b1934ee5f1c509618f2508e6eb47ee0d" + "3520686341fec936f3b79331f9315667",
+}
+
 
 def scan_text(text):
+    def without_public_pins(line):
+        for reference in PUBLIC_IMAGE_PINS:
+            line = line.replace(reference, "[verified-public-image]")
+        return line
+
     return [
         (number, label)
         for number, line in enumerate(text.splitlines(), 1)
         for label, pattern in RULES.items()
-        if pattern.search(line)
+        if pattern.search(without_public_pins(line) if label == "literal-key-material" else line)
     ]
 
 

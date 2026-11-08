@@ -1,0 +1,45 @@
+name: Release Candidate (artifact only)
+'on':
+  workflow_dispatch: {}
+  workflow_call:
+    outputs:
+      artifact_name:
+        description: Scanned development package and source provenance
+        value: ${{ jobs.package.outputs.artifact_name }}
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  package:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      artifact_name: homepod-link-candidate-${{ github.sha }}-${{ github.run_attempt }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+      with:
+        python-version: '3.14'
+    - name: Audit actual source history
+      run: python3 scripts/check_public_content.py --history --require-git
+    - name: Build and inspect development artifact
+      env:
+        SOURCE_SHA: ${{ github.sha }}
+      run: python3 scripts/build_release_artifact.py --expected-sha "$SOURCE_SHA" --output "$RUNNER_TEMP/candidate"
+    - name: Preserve package, checksum and provenance
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: homepod-link-candidate-${{ github.sha }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/candidate/
+        if-no-files-found: error
+        retention-days: 7
+    - name: Record publication boundary
+      run: echo "Development artifact only. External release-readiness gates remain separate; no tag or release was created."
+        >> "$GITHUB_STEP_SUMMARY"

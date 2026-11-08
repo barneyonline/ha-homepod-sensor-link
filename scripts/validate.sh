@@ -6,6 +6,8 @@ python3 scripts/build_wiki.py --check
 python3 scripts/check_repository.py
 python3 -m unittest discover -s tests -p test_public_content.py -q
 python3 -m unittest discover -s tests -p test_tooling.py -q
+python3 -m unittest discover -s tests -p test_automation.py -q
+sh scripts/validate_automation.sh
 report_dir="${HSL_REPORT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/homepod-link-validation.XXXXXX")}"
 versions="$(python3 -c 'import json; print(" ".join(json.load(open("devtools/validation.json"))["home_assistant"]))')"
 ruff_version="$(python3 -c 'import json; print(json.load(open("devtools/validation.json"))["ruff"])')"

@@ -1,0 +1,8 @@
+# Pinned upstream HACS validator, also used by ha-enphase-energy.
+ARG HACS_SOURCE_PLATFORM=linux/amd64
+FROM --platform=${HACS_SOURCE_PLATFORM} ghcr.io/hacs/action@sha256:a0336b447da4500204122cabea01cac1e0992840d8b927535782ddd5b601f698 AS validator
+FROM ghcr.io/home-assistant/home-assistant@sha256:1b64d38f38d922bf9d59336451fd6453e1d614f934456af4ee3d2a51061be3a4
+COPY --from=validator /hacs /hacs
+WORKDIR /hacs
+RUN python3 -c "from homeassistant.const import __version__; assert __version__ == '2026.10.0'"
+ENTRYPOINT ["python3", "/hacs/action.py"]

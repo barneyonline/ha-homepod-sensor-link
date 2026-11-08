@@ -1,0 +1,34 @@
+name: Release Assets (read-only verification)
+'on':
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  prepare:
+    uses: ./.github/workflows/release-candidate.yml
+  verify:
+    needs: prepare
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+      with:
+        python-version: '3.14'
+    - name: Download this run's validated package
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+      with:
+        name: ${{ needs.prepare.outputs.artifact_name }}
+        path: ${{ runner.temp }}/verify
+    - name: Verify downloaded bytes and source attribution
+      env:
+        SOURCE_SHA: ${{ github.sha }}
+      run: python3 scripts/build_release_artifact.py --expected-sha "$SOURCE_SHA" --verify-dir "$RUNNER_TEMP/verify"

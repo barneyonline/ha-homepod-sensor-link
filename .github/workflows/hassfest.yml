@@ -1,0 +1,30 @@
+name: Validate with current hassfest
+'on':
+  push:
+    branches:
+    - main
+  pull_request: {}
+  workflow_dispatch: {}
+  schedule:
+  - cron: 43 4 * * 1
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Pull current metadata validator
+      run: docker pull --platform linux/amd64 ghcr.io/home-assistant/hassfest:latest
+    - name: Record validator version
+      run: docker run --rm --platform linux/amd64 --network none --workdir /usr/src/homeassistant --entrypoint python3 ghcr.io/home-assistant/hassfest:latest
+        -c "from homeassistant.const import __version__; print(__version__)"
+    - name: Validate current metadata rules
+      run: docker run --rm --platform linux/amd64 --network none -v "$PWD:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest
