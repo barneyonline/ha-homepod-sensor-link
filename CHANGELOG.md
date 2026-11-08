@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add a guided macOS Terminal wizard for user-authorised KeychainKit extraction, with private progress across reboots, saved restoration instructions, and selected JSON preparation after security settings are restored. Security changes and restarts remain manual; hardware verification is still outstanding.
+
 ## 0.1.3 — 2026-11-08
 
 - Receive directed HAP discovery replies on temporary unicast UDP ports when the shared mDNS return path misses devices. Bound the requests, close sockets after success, failure or cancellation, and parse fresh service records without changing Home Assistant’s shared cache.
