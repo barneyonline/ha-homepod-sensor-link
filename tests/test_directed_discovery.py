@@ -3,9 +3,8 @@
 import json
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
-from zeroconf import DNSIncoming, ServiceStateChange
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.homepod_sensor_link import onboarding, config_flow
@@ -50,52 +49,27 @@ class DirectedDiscoveryTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
 
-    async def test_explicit_empty_answer_ptr_queries_recover_all_four_candidates(self):
+    async def test_unicast_replies_find_four_candidates_when_shared_browse_returns_none(self):
         hosts = [f"192.0.2.{i}" for i in range(1, 5)]
-        descriptions = {}
-        callback = None
         browser = SimpleNamespace(async_cancel=AsyncMock())
-
-        def browse(_zc, kind, *, handlers):
-            nonlocal callback
-            callback = handlers[0]
-            return browser
-
-        def send(query, host, port):
-            packet = DNSIncoming(query.packets()[0])
-            self.assertEqual(port, 5353)
-            self.assertEqual(packet.questions[0].name, "_hap._tcp.local.")
-            self.assertEqual(packet.questions[0].type, 12)
-            self.assertEqual(packet.answers(), [])
-            name = f"Device {hosts.index(host)}._hap._tcp.local."
-            descriptions[name] = SimpleNamespace(
-                id=f"candidate-{hosts.index(host)}", model="HomePod", name="Device", addresses=[host], port=23456
-            )
-            callback(zeroconf=None, service_type="_hap._tcp.local.", name=name, state_change=ServiceStateChange.Added)
-
-        zc = SimpleNamespace(async_wait_for_start=AsyncMock(), async_send=Mock(side_effect=send))
-
-        class Info:
-            def __init__(self, kind, name):
-                self.name = name
-
-            async def async_request(self, zc, timeout):
-                return True
-
+        infos = [
+            SimpleNamespace(name=f"Device {i}", id=f"candidate-{i}", model="HomePod", addresses=[host], port=23456)
+            for i, host in enumerate(hosts)
+        ]
         with (
             patch.object(
-                onboarding.zeroconf, "async_get_async_instance", AsyncMock(return_value=SimpleNamespace(zeroconf=zc))
+                onboarding.zeroconf,
+                "async_get_async_instance",
+                AsyncMock(return_value=SimpleNamespace(zeroconf=object())),
             ),
-            patch.object(onboarding, "AsyncServiceBrowser", side_effect=browse),
-            patch.object(onboarding, "AsyncServiceInfo", Info),
-            patch.object(
-                onboarding, "HomeKitService", SimpleNamespace(from_service_info=lambda info: descriptions[info.name])
-            ),
+            patch.object(onboarding, "AsyncServiceBrowser", return_value=browser),
+            patch.object(onboarding, "discover_hosts", AsyncMock(return_value=infos)) as discover,
+            patch.object(onboarding, "HomeKitService", SimpleNamespace(from_service_info=lambda info: info)),
             patch.object(onboarding, "DISCOVERY_WINDOW", 0),
         ):
             found = await onboarding.discover_devices(self.hass, hosts)
         self.assertEqual(len(found), 4)
-        self.assertEqual(zc.async_send.call_count, 4)
+        discover.assert_awaited_once_with(hosts)
         browser.async_cancel.assert_awaited_once()
 
 

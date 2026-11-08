@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 — 2026-11-08
 
+- Receive directed HAP discovery replies on temporary unicast UDP ports when the shared mDNS return path misses devices. Bound the requests, close sockets after success, failure or cancellation, and parse fresh service records without changing Home Assistant’s shared cache.
 - Replace the custom credential-import page with standard Home Assistant setup forms for pasting CSV/JSON exports or entering controller credentials, including a masked private-key field. Raw exports stay in memory; setup, reconfiguration and reauthentication no longer require a separate tab.
 - Reuse the existing verification task when credential submissions overlap, preventing duplicate device records and replacement of credentials during setup.
 - Give the discovery card a readable “HomePod sensors” title and explain temperature, humidity and optional automatic recovery during setup.

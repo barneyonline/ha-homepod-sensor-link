@@ -34,7 +34,7 @@ Performance regressions use deterministic operation counts in `tests/test_perfor
 
 ## Dependencies
 
-HA's native `homekit_controller` dependency supplies aiohomekit; HA also owns cryptography, zeroconf, aiohttp and probatio. Do not duplicate or independently override those runtime pins. [aiohomekit 4.0.1](https://github.com/Jc2k/aiohomekit/tree/4.0.1) uses encrypted asyncio HAP sockets rather than an injectable aiohttp/HTTPX session. The integration uses HA's AsyncZeroconf instance. Blocking protected-file work runs in drained executor jobs.
+HA's native `homekit_controller` dependency supplies aiohomekit; HA also owns cryptography, zeroconf, aiohttp and probatio. Do not duplicate or independently override those runtime pins. [aiohomekit 4.0.1](https://github.com/Jc2k/aiohomekit/tree/4.0.1) uses encrypted asyncio HAP sockets rather than an injectable aiohttp/HTTPX session. The integration uses HA's AsyncZeroconf instance for normal discovery and HAP sessions. Explicit export address hints additionally use bounded, temporary unicast UDP sockets for DNS-SD replies; these close after each request and do not modify HA's shared cache. Blocking protected-file work runs in drained executor jobs.
 
 Development requirements are pinned in `devtools/requirements-quality.txt` and `devtools/requirements-automation.txt`. Dependabot follows the Enphase policy: weekly Action updates and development Python requirements with routine version PRs disabled. Security-update settings are separate. Update the HA/image/tooling matrix deliberately and run the full gate after changing it.
 

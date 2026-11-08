@@ -7,8 +7,6 @@ from homeassistant.core import HomeAssistant, State
 from collections.abc import AsyncIterator, Callable, Awaitable
 from datetime import datetime
 from zeroconf import ServiceStateChange, Zeroconf
-from zeroconf._dns import DNSQuestion
-from zeroconf._protocol.outgoing import DNSOutgoing
 from zeroconf.asyncio import AsyncZeroconf, AsyncServiceBrowser, AsyncServiceInfo
 
 
@@ -24,6 +22,7 @@ from homeassistant.components import zeroconf
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 
+from .directed_discovery import discover_hosts
 from .backend import HomeKitBackend
 from .engine import INTERVAL, SafetyFailure
 
@@ -99,22 +98,19 @@ async def _discover_candidates(hass: HomeAssistant, hosts: list[str] | None = No
     browser = AsyncServiceBrowser(zc.zeroconf, HAP_TYPE, handlers=[changed])
     try:
         if hosts:
-            await zc.zeroconf.async_wait_for_start()
-            for host in hosts:
-                # Explicit unicast PTR queries have no known-answer section.
-                # Some peers answer these even when multicast browsing is partial.
-                query = DNSOutgoing(0, multicast=False)
-                query.add_question(DNSQuestion(HAP_TYPE, 12, 1))
-                zc.zeroconf.async_send(query, host, 5353)
-        await asyncio.sleep(DISCOVERY_WINDOW)
+            _, directed = await asyncio.gather(asyncio.sleep(DISCOVERY_WINDOW), discover_hosts(hosts))
+        else:
+            directed = []
+            await asyncio.sleep(DISCOVERY_WINDOW)
     finally:
         await browser.async_cancel()
 
-    async def resolve(name: str) -> tuple[str, Data] | None:
+    async def resolve(name: str, info: AsyncServiceInfo | None = None) -> tuple[str, Data] | None:
         try:
-            info = AsyncServiceInfo(HAP_TYPE, name)
-            if not await info.async_request(zc.zeroconf, DISCOVERY_RESOLVE_TIMEOUT):
-                return None
+            if info is None:
+                info = AsyncServiceInfo(HAP_TYPE, name)
+                if not await info.async_request(zc.zeroconf, DISCOVERY_RESOLVE_TIMEOUT):
+                    return None
             description = HomeKitService.from_service_info(info)
             if not str(description.model).lower().startswith("homepod"):
                 return None
@@ -128,7 +124,9 @@ async def _discover_candidates(hass: HomeAssistant, hosts: list[str] | None = No
 
     return {
         result[0]: result[1]
-        for result in await asyncio.gather(*(resolve(name) for name in names))
+        for result in await asyncio.gather(
+            *(resolve(name) for name in names), *(resolve(info.name, info) for info in directed)
+        )
         if result is not None
     }
 
