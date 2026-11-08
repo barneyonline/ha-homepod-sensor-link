@@ -211,6 +211,14 @@ class PackagePreflightTests(unittest.TestCase):
                 self.assertIsNone(archive.testzip())
                 names = archive.namelist()
                 self.assertIn("wiki/Home.md", names)
+                from scripts.build_wiki import PAGES
+
+                for page in PAGES:
+                    for theme in ("light", "dark"):
+                        banner = f"docs/images/wiki/{page}-{theme}.jpg"
+                        self.assertEqual(archive.read(banner), (package.ROOT / banner).read_bytes())
+                        self.assertIn(f"../{banner}", archive.read(f"wiki/{page}.md").decode())
+                self.assertNotIn("docs/images/wiki/prompts.json", names)
                 self.assertIn("LICENSES/MIT.txt", names)
                 self.assertIn(b"GNU GENERAL PUBLIC LICENSE", archive.read("LICENSE"))
                 self.assertIn("docs/images/readme-banner.svg", names)

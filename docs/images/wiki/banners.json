@@ -1,0 +1,134 @@
+{
+  "template": "README Smoked Midnight, rounded opaque speaker without a transparent border",
+  "format": "JPEG",
+  "width": 1800,
+  "height": 600,
+  "pages": [
+    {
+      "page": "Home",
+      "title": "Documentation",
+      "subtitle": "Temperature, humidity and sensor access",
+      "motif": "a cyan humidity droplet and a violet thermometer"
+    },
+    {
+      "page": "Getting-Started",
+      "title": "Getting\nStarted",
+      "subtitle": "Discover, select and connect your sensors",
+      "motif": "a cyan magnifying glass and a violet chain link"
+    },
+    {
+      "page": "Credential-Extraction",
+      "title": "Credential\nExtraction",
+      "subtitle": "Prepare an authorised controller identity",
+      "motif": "a cyan key and a violet identity card with no text or numbers"
+    },
+    {
+      "page": "Using-the-Integration",
+      "title": "Using the\nIntegration",
+      "subtitle": "Readings, diagnostics and device management",
+      "motif": "a cyan humidity droplet and a violet thermometer"
+    },
+    {
+      "page": "Automation-Examples",
+      "title": "Automation\nExamples",
+      "subtitle": "Build alerts from sensor health and readings",
+      "motif": "cyan branching automation nodes and a violet notification bell"
+    },
+    {
+      "page": "Troubleshooting-and-Support",
+      "title": "Troubleshooting\n& Support",
+      "subtitle": "Understand connection and setup problems",
+      "motif": "a cyan magnifying glass and a violet spanner"
+    },
+    {
+      "page": "Known-Limitations",
+      "title": "Known\nLimitations",
+      "subtitle": "Understand the current verification boundaries",
+      "motif": "a cyan information-circle symbol and violet boundary brackets"
+    },
+    {
+      "page": "Development-Environment",
+      "title": "Development\nEnvironment",
+      "subtitle": "Offline tests, tooling and local development",
+      "motif": "cyan terminal chevrons without code text and a violet spanner"
+    },
+    {
+      "page": "Architecture",
+      "title": "Architecture",
+      "subtitle": "How setup, monitoring and recovery fit together",
+      "motif": "cyan stacked layers and violet connected system nodes"
+    },
+    {
+      "page": "Quality-and-Readiness",
+      "title": "Quality &\nReadiness",
+      "subtitle": "Engineering targets and evidence gates",
+      "motif": "a cyan checklist with empty boxes and a violet target symbol, no awards"
+    },
+    {
+      "page": "Quality-Research",
+      "title": "Quality\nResearch",
+      "subtitle": "Home Assistant quality rules and evidence",
+      "motif": "a cyan magnifying glass and a violet checklist outline"
+    },
+    {
+      "page": "Dependencies",
+      "title": "Dependencies",
+      "subtitle": "Runtime libraries and development tooling",
+      "motif": "cyan interlocking cubes and a violet chain link"
+    },
+    {
+      "page": "Security",
+      "title": "Security",
+      "subtitle": "Credentials, identity pins and local privacy",
+      "motif": "a cyan keyhole and a violet plain shield without a tick"
+    },
+    {
+      "page": "Validation",
+      "title": "Validation",
+      "subtitle": "Tests, coverage and independent verification",
+      "motif": "cyan code brackets and a violet checklist outline, no numbers or claims"
+    },
+    {
+      "page": "Research",
+      "title": "Protocol\nResearch",
+      "subtitle": "HomeKit protocols and platform boundaries",
+      "motif": "a cyan signal waveform and violet linked protocol nodes"
+    },
+    {
+      "page": "UI-Research",
+      "title": "UI\nResearch",
+      "subtitle": "Config flows and native Home Assistant APIs",
+      "motif": "a cyan application-window outline and violet slider controls, no text"
+    },
+    {
+      "page": "Completion-Boundaries",
+      "title": "Completion\nBoundaries",
+      "subtitle": "Implemented scope and remaining evidence",
+      "motif": "cyan boundary-corner brackets and a violet checklist with empty boxes"
+    },
+    {
+      "page": "Roadmap",
+      "title": "Roadmap",
+      "subtitle": "Next steps and verification priorities",
+      "motif": "a cyan route with three milestones and a violet small flag"
+    },
+    {
+      "page": "Repository-Standards",
+      "title": "Repository\nStandards",
+      "subtitle": "Community conventions and repository quality",
+      "motif": "a cyan folder-tree outline and violet code brackets"
+    },
+    {
+      "page": "Contributing",
+      "title": "Contributing",
+      "subtitle": "Make safe, tested changes to the project",
+      "motif": "a cyan pencil and violet branching contribution nodes"
+    },
+    {
+      "page": "Release-Notes",
+      "title": "Release\nNotes",
+      "subtitle": "Development changes and project history",
+      "motif": "a cyan paper stack and a violet history clock, no version labels"
+    }
+  ]
+}

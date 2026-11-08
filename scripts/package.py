@@ -49,6 +49,7 @@ def build(output):
     for filename in ("readme-banner-light.png", "readme-banner-dark.png"):
         files.extend((ROOT / "docs/images").glob(filename))
     files.extend(sorted((ROOT / "wiki").glob("*.md")))
+    files.extend(sorted((ROOT / "docs/images/wiki").glob("*.jpg")))
     files.extend(sorted((ROOT / "devtools").glob("*.json")))
     contents = {}
     for path in files:

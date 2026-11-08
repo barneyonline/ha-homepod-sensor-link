@@ -55,7 +55,9 @@ python3 scripts/build_wiki.py --github --output /tmp/homepod-link-wiki-export
 python3 scripts/build_wiki.py --github --output /tmp/homepod-link-wiki-export --check
 ```
 
-This command has no network access and does not publish. To publish an authorised update, clone `https://github.com/barneyonline/ha-homepod-sensor-link.wiki.git`, compare and copy only the generated pages into that checkout, audit its working files/index/history with the public-content checker, and commit/push its existing default branch. Preserve unrelated Wiki content and existing history. Never delete canonical source pages or grant CI write permissions to perform this manual step.
+Every documentation page has light/dark artwork in `docs/images/wiki/`, based on the approved README template. The generator adds a theme-aware `<picture>` header with a light fallback and descriptive alternative text. Local snapshots use portable relative image paths; GitHub exports use raw Wiki image URLs and copy all publication JPEGs into `images/`. The complete theme set and exact exported bytes are checked for drift. Artwork prompts and the page catalogue live beside the assets; manual archives include only the publication JPEGs.
+
+This command has no network access and does not publish. To publish an authorised update, clone `https://github.com/barneyonline/ha-homepod-sensor-link.wiki.git`, compare and copy only the generated pages and `images/` assets into that checkout, audit its working files/index/history with the public-content checker, and commit/push its existing default branch. Preserve unrelated Wiki content and existing history. Never delete canonical source pages or grant CI write permissions to perform this manual step.
 
 The workflow keeps GitHub repository permissions at `contents: read` and supports scheduled/manual checks with `local`, `platinum` and `release` readiness modes. Validation remains offline and secret-free. There are no device credentials, release/deployment steps or wiki push. Dependabot proposes weekly Action updates.
 

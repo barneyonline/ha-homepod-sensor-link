@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.build_wiki import build
+from scripts.build_wiki import BANNER_DIR, PAGES, WIKI_IMAGES_URL, banners, build
 from scripts.check_coverage import check
 from scripts.check_repository import check_links
 from scripts.run_tests import ROOT, run
@@ -65,6 +65,58 @@ class CoverageGateTests(unittest.TestCase):
 
 
 class DocumentationGateTests(unittest.TestCase):
+    def test_every_repository_page_has_a_complete_theme_pair(self):
+        assets = banners(ROOT)
+        self.assertEqual(set(assets), {f"{page}-{theme}.jpg" for page in PAGES for theme in ("dark", "light")})
+        for page in PAGES:
+            snapshot = (ROOT / "wiki" / f"{page}.md").read_text()
+            self.assertIn(f"../docs/images/wiki/{page}-dark.jpg", snapshot)
+            self.assertIn(f'src="../docs/images/wiki/{page}-light.jpg"', snapshot)
+
+    def test_theme_headers_and_asset_bytes_survive_export_and_detect_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, exported = (Path(directory) / name for name in ("source", "export"))
+            source = root / "source.md"
+            assets = root / BANNER_DIR
+            assets.mkdir(parents=True)
+            source.write_text("# Start\n")
+            for theme in ("dark", "light"):
+                (assets / f"Home-{theme}.jpg").write_bytes(b"disposable-banner-" + theme.encode())
+            with patch("scripts.build_wiki.PAGES", {"Home": "source.md"}):
+                build(root)
+                build(root, github=True, output=exported)
+                build(root, github=True, output=exported, check=True)
+                local = (root / "wiki/Home.md").read_text()
+                published = (exported / "Home.md").read_text()
+                self.assertIn('media="(prefers-color-scheme: dark)"', published)
+                self.assertIn(f'src="{WIKI_IMAGES_URL}/Home-light.jpg"', published)
+                self.assertIn("../docs/images/wiki/Home-dark.jpg", local)
+                self.assertEqual(source.read_text(), "# Start\n")
+                for theme in ("dark", "light"):
+                    self.assertEqual(
+                        (exported / "images" / f"Home-{theme}.jpg").read_bytes(),
+                        (assets / f"Home-{theme}.jpg").read_bytes(),
+                    )
+                (exported / "images/Home-dark.jpg").write_bytes(b"changed")
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    build(root, github=True, output=exported, check=True)
+
+    def test_incomplete_or_symlinked_banners_fail_before_writing_pages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.md").write_text("# Start\n")
+            assets = root / BANNER_DIR
+            assets.mkdir(parents=True)
+            dark = assets / "Home-dark.jpg"
+            dark.write_bytes(b"disposable-banner")
+            with patch("scripts.build_wiki.PAGES", {"Home": "source.md"}):
+                with self.assertRaisesRegex(ValueError, "Missing wiki banner"):
+                    build(root)
+                (assets / "Home-light.jpg").symlink_to(dark)
+                with self.assertRaisesRegex(ValueError, "symlink"):
+                    build(root)
+            self.assertFalse((root / "wiki").exists())
+
     def test_github_export_preserves_anchors_external_links_and_local_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             root, exported = (Path(directory) / name for name in ("source", "export"))
