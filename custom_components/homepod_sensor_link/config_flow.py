@@ -9,7 +9,7 @@ from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 
 import asyncio
-from urllib.parse import urlencode
+import json
 
 import probatio as vol
 from homeassistant import config_entries
@@ -20,7 +20,9 @@ from .credentials import DOMAIN, public_targets, pinned_target
 from .onboarding import discover_devices, controller_session
 from .provisioning import prepare
 import uuid
-from .ui import KEY, local_admin, setup_ui
+from .engine import SafetyFailure
+from .importer import parse_export
+from .ui import local_admin
 from .vault import get_vault
 
 
@@ -40,8 +42,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._progress = False
         self._committed = False
         self._force_validate = False
+        self._owner: str | None = None
         self._imported: Data | None = None
-        self._import_owner: str | None = None
         self._discovery_hosts: list[str] = []
         self._selected: list[str] = []
         self._new_keys: list[str] = []
@@ -50,11 +52,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         user = local_admin(self.hass)
         if not user:
             return None
-        await setup_ui(self.hass)
-        if self._import_owner is not None and self._import_owner != user.id:
-            self._imported = None
-            self._import_owner = None
-            self._discovery_hosts = []
+        if self._owner is not None and self._owner != user.id:
+            return None
         self._owner = user.id
         self._vault = await get_vault(self.hass)
         return user
@@ -176,27 +175,94 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_credentials(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
-        imports = self.hass.data[KEY]
+        return self.async_show_menu(step_id="credentials", menu_options=["credential_export", "credential_manual"])
+
+    async def async_step_credential_export(self, user_input: Data | None = None) -> ConfigFlowResult:
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        # Access can yield on the vault lock. Reuse any task started meanwhile
+        # before parsing or replacing the credentials it is still using.
+        if hasattr(self, "_task"):
+            return await self.async_step_verify()
+        if self._imported is not None:
+            return await self._credentials_ready()
+        errors = {}
         if user_input is not None:
-            self._imported = imports.consume(self.flow_id, self._owner)
-            if self._imported is not None:
-                self._import_owner = self._owner
-                self._discovery_hosts = self._imported.get("discovery_hosts", [])
-                if not self._force_validate and (self._discovery_hosts or not self._selected):
-                    return await self.async_step_devices()
-                return await self._begin()
-        nonce = imports.grant(self.flow_id, self._owner)
-        url = "/homepod-sensor-link-import#" + urlencode({"flow": self.flow_id, "nonce": nonce})
+            try:
+                self._imported = parse_export(user_input.get("credential_export", "").encode("utf-8"))
+            except (SafetyFailure, UnicodeError):
+                errors["base"] = "invalid_credential_export"
+            else:
+                return await self._credentials_ready()
         return self.async_show_form(
-            step_id="credentials",
-            data_schema=vol.Schema({}),
-            errors={"base": "import_required"} if user_input is not None else {},
-            description_placeholders={"import_url": url},
+            step_id="credential_export",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("credential_export"): selector.TextSelector(
+                        selector.TextSelectorConfig(multiline=True, autocomplete="off")
+                    )
+                }
+            ),
+            errors=errors,
         )
 
+    async def async_step_credential_manual(self, user_input: Data | None = None) -> ConfigFlowResult:
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        if hasattr(self, "_task"):
+            return await self.async_step_verify()
+        if self._imported is not None:
+            return await self._credentials_ready()
+        errors = {}
+        if user_input is not None:
+            source = {
+                "iOSPairingId": user_input.get("controller_id", ""),
+                "iOSDeviceLTSK": user_input.get("controller_private_key", ""),
+            }
+            accessory = user_input.get("accessory_id", "")
+            pin = user_input.get("accessory_public_key", "")
+            try:
+                if bool(accessory) != bool(pin):
+                    raise SafetyFailure("invalid_credential_export")
+                self._imported = parse_export(
+                    json.dumps(
+                        {
+                            "controllers": [source],
+                            "accessories": [{"AccessoryPairingID": accessory, "AccessoryLTPK": pin}]
+                            if accessory
+                            else [],
+                        }
+                    ).encode("utf-8")
+                )
+            except SafetyFailure:
+                errors["base"] = "invalid_credential_export"
+            else:
+                return await self._credentials_ready()
+        return self.async_show_form(
+            step_id="credential_manual",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("controller_id"): selector.TextSelector(),
+                    vol.Required("controller_private_key"): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD, autocomplete="off")
+                    ),
+                    vol.Optional("accessory_id"): selector.TextSelector(),
+                    vol.Optional("accessory_public_key"): selector.TextSelector(),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def _credentials_ready(self) -> ConfigFlowResult:
+        self._discovery_hosts = cast(Data, self._imported).get("discovery_hosts", [])
+        if not self._force_validate and (self._discovery_hosts or not self._selected):
+            return await self.async_step_devices()
+        return await self._begin()
+
     async def _begin(self) -> ConfigFlowResult:
-        self._progress = False
-        self._task = self.hass.async_create_background_task(self._prepare(), "HomePod onboarding", eager_start=True)
+        if not hasattr(self, "_task"):
+            self._progress = False
+            self._task = self.hass.async_create_background_task(self._prepare(), "HomePod onboarding", eager_start=True)
         return await self.async_step_verify()
 
     async def _prepare(self) -> list[str]:
@@ -378,9 +444,6 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def async_remove(self) -> None:
-        imports = self.hass.data.get(KEY)
-        if imports:
-            imports.pending.pop(self.flow_id, None)
         self._imported = None
         if not self._committed and hasattr(self, "_vault"):
             self.hass.async_create_background_task(

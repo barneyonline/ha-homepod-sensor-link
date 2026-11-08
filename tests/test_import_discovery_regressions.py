@@ -13,7 +13,6 @@ from zeroconf import ServiceStateChange
 from custom_components.homepod_sensor_link import onboarding
 from custom_components.homepod_sensor_link.engine import SafetyFailure
 from custom_components.homepod_sensor_link.importer import parse_export
-from custom_components.homepod_sensor_link.ui import ImportView, Imports, KEY
 import test_onboarding_v2 as fixtures
 
 
@@ -80,6 +79,7 @@ class PairingDictionaryTests(unittest.TestCase):
 class ActiveDiscoveryTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
+    flow_environment = fixtures.OnboardingTests.flow_environment
 
     async def test_active_browse_collects_later_responses_and_always_cancels(self):
         services = {f"Device {i}._hap._tcp.local.": i for i in range(4)}
@@ -131,15 +131,16 @@ class ActiveDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(found), 4)
         browser.async_cancel.assert_awaited_once()
 
-    async def test_pairing_dictionary_reaches_the_supported_import_endpoint(self):
-        imports = Imports()
-        self.hass.data[KEY] = imports
-        nonce = imports.grant("flow", "owner")
-        request = fixtures.Request(json.dumps(pairing_dictionary()).encode(), peer="127.0.0.1", nonce=nonce)
-        response = await ImportView(self.hass, imports).post(request, "flow")
-        self.assertEqual(response.status, 200)
-        body = json.loads(response.body)
-        self.assertEqual(body, {"imported": True, "controller_count": 1, "accessory_count": 4})
+    async def test_pairing_dictionary_reaches_the_native_credential_form(self):
+        from custom_components.homepod_sensor_link.config_flow import HomePodSensorLinkFlow
+
+        flow = HomePodSensorLinkFlow()
+        flow.hass, flow.flow_id, flow.handler = self.hass, "flow", "homepod_sensor_link"
+        async with self.flow_environment():
+            with patch.object(flow, "_begin", AsyncMock(return_value={"type": "test"})):
+                await flow.async_step_credential_export({"credential_export": json.dumps(pairing_dictionary())})
+        self.assertEqual(len(flow._imported["controllers"]), 1)
+        self.assertEqual(len(flow._imported["accessories"]), 4)
 
     async def test_removed_unresolved_unrelated_and_invalid_services_do_not_hide_healthy_homepod(self):
         browser = SimpleNamespace(async_cancel=AsyncMock())

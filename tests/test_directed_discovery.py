@@ -10,7 +10,7 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.homepod_sensor_link import onboarding, config_flow
 from custom_components.homepod_sensor_link.importer import parse_export
-from custom_components.homepod_sensor_link.ui import KEY
+from custom_components.homepod_sensor_link.ui import current_request
 from test_import_discovery_regressions import pairing_dictionary
 import test_flow_lifecycle as flow_fixtures
 import test_onboarding_v2 as fixtures
@@ -109,12 +109,11 @@ class DirectedFlowTests(unittest.IsolatedAsyncioTestCase):
         flow = self.flow()
         async with self.flow_environment():
             await flow.async_step_user()
-            imported = parse_export(json.dumps(pairing_dictionary()))
-            self.hass.data[KEY].grant("flow", "owner")
-            self.hass.data[KEY].pending["flow"]["data"] = imported
             found = {f"candidate-{i}": {"name": f"Device {i}"} for i in range(4)}
             with patch.object(config_flow, "discover_devices", AsyncMock(return_value=found)) as discover:
-                result = await flow.async_step_credentials({})
+                result = await flow.async_step_credential_export(
+                    {"credential_export": json.dumps(pairing_dictionary())}
+                )
             self.assertEqual(result["step_id"], "devices")
             self.assertEqual(result["data_schema"]({})["devices"], list(found))
             discover.assert_awaited_once_with(self.hass, hosts=["192.0.2.1"])
@@ -125,14 +124,31 @@ class DirectedFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_another_administrator_cannot_reuse_staged_credentials_or_hints(self):
         flow = self.flow()
-        flow._imported = {"controllers": ["private"]}
-        flow._import_owner = "another-owner"
-        flow._discovery_hosts = ["192.0.2.1"]
         async with self.flow_environment():
             await flow._access()
-        self.assertIsNone(flow._imported)
-        self.assertIsNone(flow._import_owner)
-        self.assertEqual(flow._discovery_hosts, [])
+            flow._imported = parse_export(json.dumps(pairing_dictionary()))
+            flow._discovery_hosts = ["192.0.2.1"]
+            token = current_request.set(fixtures.Request(peer="127.0.0.1", owner="another-owner"))
+            try:
+                result = await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+                self.assertEqual(result["reason"], "local_admin_required")
+            finally:
+                current_request.reset(token)
+            self.assertEqual(flow._owner, "owner")
+            self.assertIsNotNone(flow._imported)
+            self.assertEqual(flow._discovery_hosts, ["192.0.2.1"])
+
+    async def test_resubmitting_staged_credentials_reuses_the_import_from_either_form(self):
+        flow = self.flow()
+        imported = parse_export(json.dumps(pairing_dictionary()))
+        flow._imported = imported
+        async with self.flow_environment():
+            with patch.object(config_flow, "parse_export") as parse:
+                for step in (flow.async_step_credential_export, flow.async_step_credential_manual):
+                    result = await step({})
+                    self.assertEqual(result["step_id"], "devices")
+                    self.assertIs(flow._imported, imported)
+                parse.assert_not_called()
 
     async def test_direct_import_without_hints_reviews_devices_but_reauth_keeps_selection(self):
         for source, selected, expected in (("reconfigure", [], "devices"), ("reauth", ["selected"], "verify")):
@@ -142,9 +158,7 @@ class DirectedFlowTests(unittest.IsolatedAsyncioTestCase):
                 flow._force_validate = source == "reauth"
                 async with self.flow_environment():
                     await flow._access()
-                    self.hass.data[KEY].grant("flow", "owner")
-                    self.hass.data[KEY].pending["flow"]["data"] = {"controllers": [], "accessories": {}}
                     with patch.object(flow, "_begin", AsyncMock(return_value={"step_id": "verify"})):
-                        result = await flow.async_step_credentials({})
+                        result = await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
                     self.assertEqual(result["step_id"], expected)
                     self.assertEqual(flow._selected, selected)

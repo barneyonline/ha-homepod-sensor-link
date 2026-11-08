@@ -22,11 +22,15 @@
       },
       "credentials": {
         "title": "Import controller credentials",
-        "description": "[Open the local administrator import page]({import_url}) in another tab, choose a selected HAP CSV or JSON export, then return here and Continue. No pairing is changed by the upload. Extraction must be explicit and authorised; see the extraction guide. Controller keys must never be posted in issues or chat. Address hints in a pairing JSON export trigger fresh discovery; review the discovered devices before continuing setup."
+        "description": "Choose how to enter your authorised HomeKit controller credentials. Existing Apple Home pairings are preserved.",
+        "menu_options": {
+          "credential_export": "Paste a CSV or JSON export",
+          "credential_manual": "Enter controller credentials"
+        }
       },
       "manage": {
         "title": "Manage a HomePod",
-        "description": "Resume permits a pending pairing write after read-only checks. Cancel pauses all setup activity. Removal deletes this device\u2019s local credentials and recovery history; it does not revoke accessory pairings or remove native entries.",
+        "description": "Resume permits a pending pairing write after read-only checks. Cancel pauses all setup activity. Removal deletes this device’s local credentials and recovery history; it does not revoke accessory pairings or remove native entries.",
         "data": {
           "device": "HomePod",
           "action": "Action"
@@ -43,6 +47,23 @@
       "reauth_confirm": {
         "title": "Verify recovery credentials",
         "description": "Continue from an authenticated local administrator session to re-import the existing pinned controller identity. Reauthentication cannot replace an identity pin or bypass pairing safety limits. Other ready devices keep working."
+      },
+      "credential_export": {
+        "title": "Paste credential export",
+        "description": "Open your selected HAP CSV or JSON export in a text editor and paste its contents below. Only include the required HomeKit records (maximum 128 KiB). The text is visible while you edit it. Raw exports stay in memory and are not saved as uploaded files. Never post credentials in issues or chat. Address hints in pairing JSON trigger fresh discovery; review the discovered devices before continuing setup.",
+        "data": {
+          "credential_export": "CSV or JSON export"
+        }
+      },
+      "credential_manual": {
+        "title": "Enter controller credentials",
+        "description": "Enter the existing controller identifier and its 64-character hexadecimal private key. New sensor access also requires the accessory identifier and pinned public key (64 hexadecimal characters). When adopting an existing native HomeKit entry, both accessory fields may be left empty. A HomeKit setup code is insufficient.",
+        "data": {
+          "controller_id": "Controller identifier",
+          "controller_private_key": "Controller private key",
+          "accessory_id": "Accessory identifier",
+          "accessory_public_key": "Pinned accessory public key"
+        }
       }
     },
     "progress": {
@@ -51,9 +72,9 @@
     "error": {
       "discovery_failed": "Discovery could not complete. Retry after checking local connectivity.",
       "select_devices": "Select one or more discovered or retained devices.",
-      "import_required": "Import credentials in the linked local page before continuing.",
       "safety_blocked": "Identity or permission validation blocked this device. Investigate the mismatch; Resume cannot replace its pinned identity.",
-      "device_action_failed": "The device action did not complete. Local state was kept or cleanup remains pending. Check protected storage and connectivity before retrying."
+      "device_action_failed": "The device action did not complete. Local state was kept or cleanup remains pending. Check protected storage and connectivity before retrying.",
+      "invalid_credential_export": "The credentials could not be read. Check the CSV/JSON format, controller identifier and private key, and accessory identifier/public key. Include both accessory fields or leave both empty. Exports must be at most 128 KiB. Enter the credentials again to retry."
     },
     "abort": {
       "local_admin_required": "Use an authenticated Home Assistant administrator on the local network. Cloud and remote imports are not accepted.",
@@ -142,7 +163,7 @@
     },
     "checks_unavailable": {
       "title": "HomePod monitoring could not complete",
-      "description": "Check the integration\u2019s protected storage and local connectivity, then reload the integration. Keep existing credential files and safety history intact. Do not make permissions public or remove identity pins to bypass the failure."
+      "description": "Check the integration’s protected storage and local connectivity, then reload the integration. Keep existing credential files and safety history intact. Do not make permissions public or remove identity pins to bypass the failure."
     },
     "engine_conflict": {
       "title": "Another HomePod recovery engine is configured",

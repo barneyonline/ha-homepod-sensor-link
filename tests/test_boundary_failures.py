@@ -9,7 +9,6 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers import entity_registry as er, device_registry as dr
 
 from custom_components.homepod_sensor_link import onboarding, ui, sensor
@@ -178,39 +177,9 @@ class BoundaryLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 async with onboarding.controller_session(self.hass):
                     raise ValueError("primary")
 
-    async def test_import_capacity_bad_peer_expired_inflight_upload_and_ui_stop(self):
+    async def test_invalid_request_and_bad_peer_are_refused(self):
         for request in (None, {}, SimpleNamespace(get=lambda *a: Mock(is_admin=True), remote="invalid")):
             self.assertIsNone(ui.local_admin(self.hass, request))
-        imports = ui.Imports()
-        for index in range(8):
-            imports.grant(str(index), "owner")
-        self.assertEqual(imports.grant("0", "owner"), imports.pending["0"]["nonce"])
-        with self.assertRaises(ValueError):
-            imports.grant("overflow", "owner")
-        imports.pending.clear()
-        nonce = imports.grant("flow", "owner")
-        request = fixtures.Request(peer="127.0.0.1", nonce=nonce)
-
-        async def revoked(_size):
-            imports.pending.clear()
-            yield json.dumps(self.export).encode()
-
-        request.content.iter_chunked = revoked
-        self.assertEqual((await ui.ImportView(self.hass, imports).post(request, "flow")).status, 400)
-        self.hass.data.pop(ui.KEY)
-        http = SimpleNamespace(register_view=Mock(), async_register_static_paths=AsyncMock())
-        with (
-            patch.object(self.hass, "http", http, create=True),
-            patch.object(ui.panel_custom, "async_register_panel", AsyncMock()) as panel,
-        ):
-            await ui.setup_ui(self.hass)
-            await ui.setup_ui(self.hass)
-            panel.assert_awaited_once()
-            http.register_view.assert_called_once()
-            self.hass.data[ui.KEY].grant("flow", "owner")
-            self.hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
-            await self.hass.async_block_till_done()
-            self.assertEqual(self.hass.data[ui.KEY].pending, {})
 
     async def test_owned_platform_creates_only_owned_measurements_and_exposes_pending_status(self):
         from custom_components.homepod_sensor_link.engine import DeviceState

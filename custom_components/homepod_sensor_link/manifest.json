@@ -8,9 +8,7 @@
   "dependencies": [
     "homekit_controller",
     "zeroconf",
-    "http",
-    "frontend",
-    "panel_custom"
+    "http"
   ],
   "documentation": "https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/README.md",
   "integration_type": "service",
