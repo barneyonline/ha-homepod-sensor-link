@@ -36,6 +36,7 @@ from custom_components.homepod_sensor_link.sensor import Measurement, RecoverySt
 from custom_components.homepod_sensor_link.ui import current_request
 from custom_components.homepod_sensor_link.vault import get_vault, DATA_FILE
 from test_recovery import fixture, keypair
+from scripts.macos_homekit_export import parse_dump
 
 
 def entry(data=None):
@@ -70,6 +71,18 @@ def export_fixture():
 
 
 class ImportParserTests(unittest.TestCase):
+    def test_automatically_converted_macos_dump_is_accepted_without_key_reentry(self):
+        source, accessory, _ = export_fixture()
+        dump = (
+            "HomeKit Pairing Identity (com.apple.hap.pairing)\n"
+            f"Account: {source['iOSPairingId']}\nKey: {source['iOSDeviceLTPK']}{source['iOSDeviceLTSK']}\n\n"
+            "Paired HomeKit Accessory (com.apple.hap.pairing)\n"
+            f"Account: {accessory['accessory_id']}\nKey: {accessory['accessory_key']}\n"
+        )
+        parsed = parse_export(json.dumps(parse_dump(dump.encode())))
+        self.assertEqual(parsed["controllers"], [source])
+        self.assertEqual(parsed["accessories"], {accessory["accessory_id"]: accessory["accessory_key"]})
+
     def test_json_derives_public_key_and_rejects_mismatch(self):
         source, accessory, export = export_fixture()
         export["controllers"][0].pop("iOSDeviceLTPK")
