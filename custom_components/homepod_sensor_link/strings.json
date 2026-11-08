@@ -8,7 +8,7 @@
       },
       "devices": {
         "title": "Select HomePods",
-        "description": "Discovery supplies candidates and network endpoints. Authentication verifies their pinned identities. Existing native entries are adopted without changing their entities.",
+        "description": "Select the HomePods you want to add. HomePods already managed by HomePod Sensor Link are hidden. Existing Home Assistant sensor entities and their history are preserved.",
         "data": {
           "devices": "HomePods"
         }
@@ -63,6 +63,22 @@
           "controller_private_key": "Controller private key",
           "accessory_id": "Accessory identifier",
           "accessory_public_key": "Pinned accessory public key"
+        }
+      },
+      "no_devices": {
+        "title": "No HomePods found",
+        "description": "No HomePods are available to add. HomePods already managed by HomePod Sensor Link are hidden.\n\nMake sure your HomePods are powered on and Home Assistant can reach them on the local network. Their HomeKit sensor service must be discoverable; appearing as an AirPlay player is not enough.\n\nSearch again, or import a pairing export with local address hints to help find missing HomePods.",
+        "menu_options": {
+          "devices": "Search again",
+          "import_missing": "Import pairing export"
+        }
+      },
+      "discovery_failed": {
+        "title": "Could not search for HomePods",
+        "description": "The search could not complete. Check the local network connection and try again.\n\nMake sure your HomePods are powered on and Home Assistant can reach them on the local network. Their HomeKit sensor service must be discoverable; appearing as an AirPlay player is not enough.\n\nSearch again, or import a pairing export with local address hints to help find missing HomePods.",
+        "menu_options": {
+          "devices": "Search again",
+          "import_missing": "Import pairing export"
         }
       }
     },

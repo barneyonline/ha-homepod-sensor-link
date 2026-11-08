@@ -148,8 +148,11 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
         for name in (
             "user",
             "devices",
+            "no_devices",
+            "discovery_failed",
             "policy",
             "credentials",
+            "import_missing",
             "credential_export",
             "credential_manual",
             "finish",
@@ -219,14 +222,51 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(result["errors"], {"base": "select_devices"})
                         self.assertEqual(result["data_schema"]({})["devices"], expected)
 
-    async def test_empty_discovery_has_empty_default_and_can_retry(self):
-        flow = self.flow()
+    async def test_empty_discovery_offers_retry_instead_of_empty_selector(self):
         async with self.flow_environment():
-            with patch.object(flow_module, "discover_devices", AsyncMock(return_value={})):
-                result = await flow.async_step_devices()
-                self.assertEqual(result["data_schema"]({})["devices"], [])
+            for source in ("user", "reconfigure"):
+                for submitted in (None, {}, {"devices": [self.target["accessory_id"]]}):
+                    with self.subTest(source=source, submitted=submitted):
+                        flow = self.flow(source)
+                        with patch.object(flow_module, "discover_devices", AsyncMock(return_value={})):
+                            result = await flow.async_step_devices(submitted)
+                        self.assertEqual(result["type"], FlowResultType.MENU)
+                        self.assertEqual(result["step_id"], "no_devices")
+                        self.assertEqual(result["menu_options"], ["devices", "import_missing"])
+                        self.assertEqual(flow._selected, [])
+                        retry = result["data_schema"]({"next_step_id": "devices"})
+                        result = await getattr(flow, "async_step_" + retry["next_step_id"])()
+                        self.assertEqual(result["step_id"], "devices")
+                        self.assertEqual(result["data_schema"]({})["devices"], [self.target["accessory_id"]])
+
+    async def test_empty_discovery_failure_is_distinct_and_can_retry(self):
+        async with self.flow_environment():
+            flow = self.flow()
+            with patch.object(flow_module, "discover_devices", AsyncMock(side_effect=OSError("private details"))):
+                for submitted in (None, {"devices": []}):
+                    result = await flow.async_step_devices(submitted)
+                    self.assertEqual(result["type"], FlowResultType.MENU)
+                    self.assertEqual(result["step_id"], "discovery_failed")
+                    self.assertEqual(result["menu_options"], ["devices", "import_missing"])
+                    self.assertNotIn("private details", str(result))
+            self.assertEqual((await flow.async_step_devices())["step_id"], "devices")
+
+    async def test_only_active_devices_shows_empty_state_and_export_can_find_missing_devices(self):
+        active = deepcopy(self.record)
+        active["phase"] = "active"
+        await self.vault.put(self.key, active)
+        async with self.flow_environment():
+            flow = self.flow("reconfigure")
             result = await flow.async_step_devices()
-            self.assertEqual(result["data_schema"]({})["devices"], [self.target["accessory_id"]])
+            self.assertEqual(result["step_id"], "no_devices")
+            choice = result["data_schema"]({"next_step_id": "import_missing"})
+            result = await getattr(flow, "async_step_" + choice["next_step_id"])()
+            self.assertEqual(result["step_id"], "credential_export")
+            found = {"missing-homepod": {"name": "Missing HomePod"}}
+            with patch.object(flow_module, "discover_devices", AsyncMock(return_value=found)):
+                result = await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+            self.assertEqual(result["step_id"], "devices")
+            self.assertEqual(result["data_schema"]({})["devices"], ["missing-homepod"])
 
     async def test_monitor_only_native_setup_needs_no_export(self):
         target, source_entry = fixture()

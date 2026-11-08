@@ -123,6 +123,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._discovered.pop(record["target"]["accessory_id"], None)
                 continue
             self._discovered.setdefault(record["target"]["accessory_id"], {"name": record.get("name", "HomePod")})
+        if not self._discovered:
+            return await self.async_step_discovery_failed() if errors else await self.async_step_no_devices()
         if user_input is not None:
             selected = user_input.get("devices", [])
             if selected and len(set(selected)) == len(selected) and set(selected) <= self._discovered.keys():
@@ -145,6 +147,16 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
         )
+
+    async def async_step_no_devices(self, user_input: Data | None = None) -> ConfigFlowResult:
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        return self.async_show_menu(step_id="no_devices", menu_options=["devices", "import_missing"])
+
+    async def async_step_discovery_failed(self, user_input: Data | None = None) -> ConfigFlowResult:
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        return self.async_show_menu(step_id="discovery_failed", menu_options=["devices", "import_missing"])
 
     async def async_step_policy(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
@@ -176,6 +188,18 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
         return self.async_show_menu(step_id="credentials", menu_options=["credential_export", "credential_manual"])
+
+    async def async_step_import_missing(self, user_input: Data | None = None) -> ConfigFlowResult:
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        if hasattr(self, "_task"):
+            return await self.async_step_verify()
+        # The empty-state action explicitly requests a fresh export. Search
+        # again keeps the staged import; verification must keep it immutable.
+        self._imported = None
+        self._discovery_hosts = []
+        self._selected = []
+        return await self.async_step_credential_export()
 
     async def async_step_credential_export(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
