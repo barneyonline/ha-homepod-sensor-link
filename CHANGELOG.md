@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Choose a HomePod before opening its native action menu, with descriptions, a recovery action matching its current setting and a review step before changes. Require explicit confirmation before deleting local credentials and recovery history.
+
 - Replace the empty HomePod selector with a clear message, local discovery guidance and options to search again or import a pairing export. Show a separate message when discovery fails.
 - Allow a corrected pairing export after an empty or failed search without restarting setup; searching again keeps the existing import.
 - Use a HomePod's AirPlay name during discovery and refresh existing device names when the integration loads. Require a unique match to freshly discovered sensor addresses; keep the current name when discovery fails or matching is ambiguous, and preserve Home Assistant device and entity name overrides.
