@@ -185,7 +185,6 @@ class PackagePreflightTests(unittest.TestCase):
                 "LICENSE",
                 "hacs.json",
                 "quality_scale.yaml",
-                "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml",
             ):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -220,8 +219,7 @@ class PackagePreflightTests(unittest.TestCase):
                 names = archive.namelist()
                 self.assertFalse(any(name.startswith("wiki/") for name in names))
                 self.assertFalse(any(name.startswith("docs/") and name.endswith(".md") for name in names))
-                blueprint = "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml"
-                self.assertEqual(archive.read(blueprint), (package.ROOT / blueprint).read_bytes())
+                self.assertFalse(any(name.startswith("blueprints/") for name in names))
                 from scripts.wiki import PAGES
 
                 for page in PAGES:

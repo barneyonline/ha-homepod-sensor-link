@@ -38,6 +38,7 @@ from .onboarding import sensor_ids, verify_readings
 from .engine import INTERVAL, RecoveryEngine, SafetyFailure, AuthenticationFailure, DeviceState
 from .provisioning import Provisioner, boot_id
 from .vault import Vault, VaultStates
+from .watchdog import HeartbeatWatchdog
 
 _LOGGER = logging.getLogger(__name__)
 OWNER = DOMAIN + ".owner"
@@ -115,6 +116,12 @@ class Runtime:
         self.records: dict[str, Record] = {}
         self.stopped = self.closed = False
         self._runtime_listener: Callable[[], None] | None = None
+        self.watchdog = HeartbeatWatchdog(
+            hass,
+            entry.entry_id,
+            self.monitored_devices,
+            lambda: not self.stopped and hass.state == CoreState.running and not conflicting_recovery(hass),
+        )
         self.backend = HomeKitBackend(controller, zeroconf_instance, hass.config_entries.async_get_entry)
         self.coordinator = DataUpdateCoordinator(
             hass,
@@ -178,6 +185,7 @@ class Runtime:
             verify_native=self.verify_native,
             automatic_recovery=True,
             is_active=lambda: not self.stopped and not conflicting_recovery(self.hass),
+            check_completed=self.watchdog.completed,
         )
         self.backend.write_allowed = self.engine.is_active
         if self.vault:
@@ -205,6 +213,15 @@ class Runtime:
         if self._runtime_listener is None:
             self._runtime_listener = self.coordinator.async_add_listener(lambda: None)
 
+    def monitored_devices(self) -> set[str]:
+        return {
+            key
+            for key, record in self.records.items()
+            if record["phase"] not in ("needs_credentials", "blocked")
+            and not record.get("cancelled")
+            and not self.engine.states[key].blocked
+        }
+
     def sync_targets(self) -> None:
         self.targets = [r["target"] for r in self.records.values()]
         self.engine.targets = [
@@ -215,6 +232,7 @@ class Runtime:
         for key, record in self.records.items():
             state = self.engine.states.setdefault(key, DeviceState())
             state.attempts = sorted(set(state.attempts + record.get("onboarding_attempts", [])))
+        self.watchdog.check()
 
     async def accept_inventory(self, data: Data) -> None:
         """Accept guided per-device results without unloading healthy peers."""
@@ -354,6 +372,8 @@ class Runtime:
         if values:
             self.publish(record["target"], values)
             await self.finish_publication(key)
+        self.engine.states[key].last_completed = dt_util.utcnow().timestamp()
+        self.watchdog.completed(key)
 
     async def save_state(self, current: Snapshot) -> None:
         self.saved.update(current)
@@ -559,6 +579,7 @@ class Runtime:
         if self.closed:
             return
         self.stopped = True
+        self.watchdog.stop()
         for task in self.pending_tasks.values():
             task.cancel()
         await asyncio.gather(*list(self.pending_tasks.values()), return_exceptions=True)

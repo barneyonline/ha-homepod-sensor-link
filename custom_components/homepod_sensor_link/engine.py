@@ -39,6 +39,7 @@ class RecoveryPaused(OSError):
 class DeviceState:
     status: str = "starting"
     last_checked: float | None = None
+    last_completed: float | None = None
     last_verified: float | None = None
     auth_since: float | None = None
     auth_failures: int = 0
@@ -72,6 +73,7 @@ class DeviceState:
 
         timestamps = (
             "last_checked",
+            "last_completed",
             "last_verified",
             "auth_since",
             "last_repair",
@@ -141,6 +143,7 @@ class RecoveryEngine:
         verify_native: Callable[[Target], Awaitable[None]] | None = None,
         automatic_recovery: bool = True,
         is_active: Callable[[], bool] | None = None,
+        check_completed: Callable[[str], None] | None = None,
     ) -> None:
         self.targets = targets
         self.backend = backend
@@ -151,6 +154,7 @@ class RecoveryEngine:
         self.verify_native = verify_native
         self.automatic_recovery = automatic_recovery
         self.is_active = is_active or (lambda: True)
+        self.check_completed = check_completed or (lambda _key: None)
         if states is not None and not isinstance(states, dict):
             raise SafetyFailure("invalid_persisted_state")
         self.started = clock()
@@ -170,6 +174,9 @@ class RecoveryEngine:
             async def check(target: Target) -> None:
                 if self.is_active():
                     await self._check(target)
+                    key = target["entry_id"]
+                    self.states[key].last_completed = self.clock()
+                    self.check_completed(key)
 
             async with asyncio.TaskGroup() as group:
                 for target in self.targets:

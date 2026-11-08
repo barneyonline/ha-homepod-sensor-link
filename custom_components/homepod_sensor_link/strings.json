@@ -226,6 +226,10 @@
     "engine_conflict": {
       "title": "Another HomePod recovery engine is configured",
       "description": "Use only one recovery engine. Stop or disable the conflicting helper through its own supported process, then retry HomePod Sensor Link setup. Old credentials and state are never migrated or removed by this integration."
+    },
+    "monitoring_stalled": {
+      "title": "HomePod Sensor Link monitoring has stalled",
+      "description": "One or more HomePods have no completed sensor check in at least 15 minutes. Review the Sensor access diagnostics and reload the integration if monitoring remains stalled. This alert makes no pairing changes and clears when checks resume. Intentional pauses and devices awaiting credentials are excluded."
     }
   }
 }
