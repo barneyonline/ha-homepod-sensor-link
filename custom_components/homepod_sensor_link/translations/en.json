@@ -101,7 +101,7 @@
       "device_updated": "Device settings updated.",
       "reauth_not_required": "These monitoring-only devices do not need an administrator credential. Use Reconfigure to manage them.",
       "reauth_successful": "The existing pinned administrator credentials were verified.",
-      "reconfigure_successful": "The selected devices were updated without restarting healthy peers."
+      "reconfigure_successful": "The selected HomePods have been added to HomePod Sensor Link."
     }
   },
   "services": {
