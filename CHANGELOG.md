@@ -4,6 +4,7 @@
 
 - Replace the custom credential-import page with standard Home Assistant setup forms for pasting CSV/JSON exports or entering controller credentials, including a masked private-key field. Raw exports stay in memory; setup, reconfiguration and reauthentication no longer require a separate tab.
 - Reuse the existing verification task when credential submissions overlap, preventing duplicate device records and replacement of credentials during setup.
+- Give the discovery card a readable “HomePod sensors” title and explain temperature, humidity and optional automatic recovery during setup.
 
 ## 0.1.2 — 2026-11-08
 

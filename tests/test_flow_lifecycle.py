@@ -159,8 +159,11 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(step=name):
                 result = await getattr(self.flow(), "async_step_" + name)()
                 self.assertEqual(result["reason"], "local_admin_required")
-        result = await self.flow().async_step_zeroconf(SimpleNamespace())
+        flow = self.flow("zeroconf")
+        result = await flow.async_step_zeroconf(SimpleNamespace())
         self.assertEqual(result["step_id"], "user")
+        self.assertEqual(flow.context["title_placeholders"], {"name": "HomePod sensors"})
+        self.assertEqual(flow.unique_id, DOMAIN)
 
     async def test_discovery_failure_selection_validation_and_retained_journals(self):
         await self.vault.put(self.key, self.record)

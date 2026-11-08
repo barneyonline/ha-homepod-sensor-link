@@ -3,8 +3,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "HomePod Sensor Link",
-        "description": "Discover HomePod sensors, import authorised controller credentials, and set up sensor access."
+        "title": "Set up HomePod sensors",
+        "description": "Add temperature and humidity sensors from your HomePods to Home Assistant. You can also enable automatic recovery if sensor access is lost."
       },
       "devices": {
         "title": "Select HomePods",
