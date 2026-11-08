@@ -79,6 +79,69 @@ class DirectedFlowTests(unittest.IsolatedAsyncioTestCase):
     flow = flow_fixtures.FlowLifecycleTests.flow
     flow_environment = fixtures.OnboardingTests.flow_environment
 
+    async def test_empty_search_can_retry_with_same_export_or_import_corrected_hints(self):
+        manager = self.hass.config_entries.flow
+        async with self.flow_environment():
+            for failure in (None, OSError()):
+                with self.subTest(failure=failure):
+                    with (
+                        patch(
+                            "homeassistant.config_entries._async_get_flow_handler",
+                            AsyncMock(return_value=config_flow.HomePodSensorLinkFlow),
+                        ),
+                        patch.object(config_flow, "discover_devices", AsyncMock(return_value={})),
+                    ):
+                        result = await manager.async_init(config_flow.DOMAIN, context={"source": "user"})
+                    flow_id = result["flow_id"]
+                    flow = manager._progress[flow_id]
+                    result = await manager.async_configure(flow_id, {"next_step_id": "import_missing"})
+                    self.assertEqual(result["step_id"], "credential_export")
+                    with patch.object(config_flow, "discover_devices", AsyncMock(return_value={}, side_effect=failure)):
+                        result = await manager.async_configure(
+                            flow_id, {"credential_export": json.dumps(pairing_dictionary())}
+                        )
+                        self.assertEqual(result["step_id"], "discovery_failed" if failure else "no_devices")
+                        imported = flow._imported
+                        result = await manager.async_configure(flow_id, {"next_step_id": "devices"})
+                        self.assertIs(flow._imported, imported)
+                        self.assertEqual(flow._discovery_hosts, ["192.0.2.1"])
+                    result = await manager.async_configure(flow_id, {"next_step_id": "import_missing"})
+                    self.assertEqual(result["step_id"], "credential_export")
+                    self.assertIsNone(flow._imported)
+                    self.assertEqual(flow._discovery_hosts, [])
+                    result = await manager.async_configure(flow_id, {"credential_export": "invalid"})
+                    self.assertEqual(result["errors"], {"base": "invalid_credential_export"})
+                    corrected = pairing_dictionary()
+                    for record in corrected.values():
+                        record["AccessoryIP"] = "192.0.2.2"
+                        record["AccessoryIPs"] = ["192.0.2.2"]
+                    found = {"missing-homepod": {"name": "Missing HomePod"}}
+                    with patch.object(config_flow, "discover_devices", AsyncMock(return_value=found)) as discover:
+                        result = await manager.async_configure(flow_id, {"credential_export": json.dumps(corrected)})
+                    discover.assert_awaited_once_with(self.hass, hosts=["192.0.2.2"])
+                    self.assertEqual(result["step_id"], "devices")
+                    self.assertEqual(result["data_schema"]({})["devices"], ["missing-homepod"])
+                    self.assertFalse(hasattr(flow, "_task"))
+                    self.assertEqual(self.vault.records(), {})
+                    manager.async_abort(flow_id)
+
+    async def test_import_missing_keeps_credentials_used_by_verification(self):
+        flow = self.flow()
+        imported = parse_export(json.dumps(pairing_dictionary()))
+        flow._imported = imported
+        flow._discovery_hosts = ["192.0.2.1"]
+        flow._selected = ["selected-homepod"]
+        flow._task = self.hass.loop.create_future()
+        flow._task.set_result([])
+        async with self.flow_environment():
+            with patch.object(flow, "async_step_verify", AsyncMock(return_value={"step_id": "verify"})) as verify:
+                result = await flow.async_step_import_missing()
+            verify.assert_awaited_once()
+            self.assertEqual(result["step_id"], "verify")
+            self.assertIs(flow._imported, imported)
+            self.assertEqual(flow._discovery_hosts, ["192.0.2.1"])
+            self.assertEqual(flow._selected, ["selected-homepod"])
+
     async def test_import_reviews_new_candidates_before_pairing_and_reuses_same_owner_import(self):
         flow = self.flow()
         async with self.flow_environment():
