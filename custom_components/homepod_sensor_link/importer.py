@@ -8,6 +8,7 @@ from .models import Data
 import csv
 import io
 import json
+from ipaddress import ip_address
 
 from .credentials import _public
 from .engine import SafetyFailure
@@ -16,6 +17,24 @@ MAX_IMPORT = 131072
 CONTROLLER_FIELDS = {"iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK"}
 PAIRING_FIELDS = CONTROLLER_FIELDS | {"AccessoryPairingID", "AccessoryLTPK"}
 TRANSPORT_FIELDS = {"AccessoryIP", "AccessoryIPs", "AccessoryPort", "Connection"}
+
+
+def discovery_hosts(record: Data) -> list[str]:
+    """Use literal unicast address hints only; advertised HAP ports stay fresh."""
+    values = record.get("AccessoryIPs", [])
+    values = values if isinstance(values, list) else []
+    hosts = []
+    for value in [record.get("AccessoryIP"), *values]:
+        try:
+            if not isinstance(value, str):
+                continue
+            address = ip_address(value)
+            if address.is_unspecified or address.is_multicast or address.is_loopback or address.is_link_local:
+                continue
+            hosts.append(str(address))
+        except ValueError:
+            continue
+    return hosts
 
 
 def _hex(value: str, length: int) -> str:
@@ -37,6 +56,7 @@ def parse_export(content: bytes | str) -> Data:
             raise ValueError
         text = content.decode("utf-8-sig") if isinstance(content, bytes) else content
         controllers, accessories = [], []
+        hosts: dict[str, None] = {}
         if text.lstrip().startswith("{"):
 
             def pairs(items: list[tuple[str, Any]]) -> Data:
@@ -64,7 +84,8 @@ def parse_export(content: bytes | str) -> Data:
                 controllers, accessories = data["controllers"], data["accessories"]
             else:
                 # aiohomekit exports are keyed by accessory ID. Endpoints are
-                # historical metadata, never trusted for identity or discovery.
+                # historical metadata. Addresses only prompt fresh DNS-SD;
+                # exported ports and identities never authorise connections.
                 if not 1 <= len(data) <= 64:
                     raise ValueError
                 for identifier, record in data.items():
@@ -76,6 +97,7 @@ def parse_export(content: bytes | str) -> Data:
                         raise ValueError
                     controllers.append({k: record[k] for k in CONTROLLER_FIELDS if k in record})
                     accessories.append({k: record[k] for k in ("AccessoryPairingID", "AccessoryLTPK")})
+                    hosts.update(dict.fromkeys(discovery_hosts(record)))
         else:
             reader = csv.DictReader(io.StringIO(text))
             if not {"Account", "Password", "App / Group"} <= set(reader.fieldnames or []):
@@ -124,6 +146,9 @@ def parse_export(content: bytes | str) -> Data:
                 raise ValueError
             pins[identifier] = public
             raw_ids[identifier] = raw
-        return {"controllers": list(identities.values()), "accessories": pins, "accessory_identifiers": raw_ids}
+        result = {"controllers": list(identities.values()), "accessories": pins, "accessory_identifiers": raw_ids}
+        if hosts:
+            result["discovery_hosts"] = list(hosts)[:64]
+        return result
     except Exception:
         raise SafetyFailure("invalid_credential_export") from None

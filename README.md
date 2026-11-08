@@ -53,7 +53,7 @@ Credential import requires a local HA administrator. HTTP import is accepted but
 <details>
 <summary>Setup, recovery and removal details</summary>
 
-- Credential import accepts selected HAP CSV rows, a single JSON credential record, `controllers`/`accessories` JSON bundles, and aiohomekit JSON dictionaries keyed by accessory ID. Dictionary records may include historical network fields; discovery supplies current endpoints and imported keys supply identity pins.
+- Credential import accepts selected HAP CSV rows, a single JSON credential record, `controllers`/`accessories` JSON bundles, and aiohomekit JSON dictionaries keyed by accessory ID. Dictionary records may include historical network fields. Literal address hints trigger directed DNS-SD discovery when multicast misses a HomePod; fresh advertisements supply current ports and imported keys supply identity pins. Use Reconfigure → Import pairing export to find missing devices, then review the newly discovered devices before setup.
 - Setup actively browses for sensor services for five seconds, then resolves their current endpoints. A HomePod that does not advertise its sensor service may remain absent even when its AirPlay player is visible.
 
 - New devices use a dedicated User controller; existing native HomeKit sensor entities and history remain unchanged.

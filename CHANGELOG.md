@@ -5,6 +5,11 @@
 - Replace the custom credential-import page with standard Home Assistant setup forms for pasting CSV/JSON exports or entering controller credentials, including a masked private-key field. Raw exports stay in memory; setup, reconfiguration and reauthentication no longer require a separate tab.
 - Reuse the existing verification task when credential submissions overlap, preventing duplicate device records and replacement of credentials during setup.
 
+## 0.1.2 — 2026-11-08
+
+- Find HomePods missed by multicast browsing using bounded, directed HAP DNS-SD queries to literal address hints in an imported pairing dictionary. Exported ports remain unused; authentication still verifies pinned identities.
+- Add a pairing-import option to Reconfigure and review newly discovered devices before pairing. Keep staged credentials tied to the importing administrator and preserve reauthentication selections.
+
 ## 0.1.1 — 2026-11-08
 
 - Import aiohomekit pairing dictionaries keyed by accessory ID, validating their controller and accessory identities while ignoring historical network endpoints.

@@ -484,6 +484,8 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.wait_for(submissions_waiting.wait(), 1)
                     results = await asyncio.gather(*submissions)
                     await asyncio.wait_for(probe_started.wait(), 1)
+                    progress = await flow._begin()
+                    self.assertIs(progress["progress_task"], flow._task)
             finally:
                 release_probe.set()
                 await asyncio.gather(*preparation_tasks)

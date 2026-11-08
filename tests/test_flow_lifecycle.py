@@ -52,6 +52,7 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_export_rejects_invalid_and_utf8_oversize_without_echo_then_retries(self):
         async with self.flow_environment():
             flow = self.flow()
+            flow._selected = [self.target["accessory_id"]]
             for content in (
                 "invalid " + self.source["iOSDeviceLTSK"],
                 "x" * (MAX_IMPORT + 1),
@@ -77,6 +78,7 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
         csv += f"{self.target['accessory_id']},{self.target['accessory_key']},com.apple.hap.pairing\n"
         async with self.flow_environment():
             flow = self.flow()
+            flow._selected = [self.target["accessory_id"]]
             with patch.object(flow, "_begin", AsyncMock(return_value={"type": "test"})):
                 await flow.async_step_credential_export({"credential_export": csv})
             self.assertEqual(flow._imported["controllers"], [self.source])
@@ -86,6 +88,7 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
         valid = {"controller_id": self.source["iOSPairingId"], "controller_private_key": self.source["iOSDeviceLTSK"]}
         async with self.flow_environment():
             flow = self.flow()
+            flow._selected = [self.target["accessory_id"]]
             for invalid in (
                 {},
                 {**valid, "accessory_id": "missing-pin"},
@@ -108,6 +111,7 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     {self.target["accessory_id"]: self.target["accessory_key"]},
                 ),
             ):
+                flow._imported = None
                 with patch.object(flow, "_begin", AsyncMock(return_value={"type": "test"})) as begin:
                     await flow.async_step_credential_manual(value)
                 begin.assert_awaited_once()

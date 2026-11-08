@@ -44,6 +44,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._force_validate = False
         self._owner: str | None = None
         self._imported: Data | None = None
+        self._discovery_hosts: list[str] = []
         self._selected: list[str] = []
         self._new_keys: list[str] = []
 
@@ -100,14 +101,18 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
-        return self.async_show_menu(step_id="reconfigure", menu_options=["devices", "manage"])
+        return self.async_show_menu(step_id="reconfigure", menu_options=["devices", "credentials", "manage"])
 
     async def async_step_devices(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
         errors = {}
         try:
-            self._discovered = await discover_devices(self.hass)
+            self._discovered = (
+                await discover_devices(self.hass, hosts=self._discovery_hosts)
+                if self._discovery_hosts
+                else await discover_devices(self.hass)
+            )
         except Exception:
             self._discovered = {}
             errors["base"] = "discovery_failed"
@@ -150,9 +155,10 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             needs_import = any(
                 k in self._recovery_ids or "native_entry_id" not in self._discovered[k] for k in self._selected
             )
-            if needs_import:
+            if needs_import and self._imported is None:
                 return await self.async_step_credentials()
-            self._imported = {"controllers": [], "accessories": {}}
+            if self._imported is None:
+                self._imported = {"controllers": [], "accessories": {}}
             return await self._begin()
         return self.async_show_form(
             step_id="policy",
@@ -177,6 +183,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # before parsing or replacing the credentials it is still using.
         if hasattr(self, "_task"):
             return await self.async_step_verify()
+        if self._imported is not None:
+            return await self._credentials_ready()
         errors = {}
         if user_input is not None:
             try:
@@ -184,7 +192,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except (SafetyFailure, UnicodeError):
                 errors["base"] = "invalid_credential_export"
             else:
-                return await self._begin()
+                return await self._credentials_ready()
         return self.async_show_form(
             step_id="credential_export",
             data_schema=vol.Schema(
@@ -202,6 +210,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="local_admin_required")
         if hasattr(self, "_task"):
             return await self.async_step_verify()
+        if self._imported is not None:
+            return await self._credentials_ready()
         errors = {}
         if user_input is not None:
             source = {
@@ -226,7 +236,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except SafetyFailure:
                 errors["base"] = "invalid_credential_export"
             else:
-                return await self._begin()
+                return await self._credentials_ready()
         return self.async_show_form(
             step_id="credential_manual",
             data_schema=vol.Schema(
@@ -242,9 +252,16 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def _credentials_ready(self) -> ConfigFlowResult:
+        self._discovery_hosts = cast(Data, self._imported).get("discovery_hosts", [])
+        if not self._force_validate and (self._discovery_hosts or not self._selected):
+            return await self.async_step_devices()
+        return await self._begin()
+
     async def _begin(self) -> ConfigFlowResult:
-        self._progress = False
-        self._task = self.hass.async_create_background_task(self._prepare(), "HomePod onboarding", eager_start=True)
+        if not hasattr(self, "_task"):
+            self._progress = False
+            self._task = self.hass.async_create_background_task(self._prepare(), "HomePod onboarding", eager_start=True)
         return await self.async_step_verify()
 
     async def _prepare(self) -> list[str]:

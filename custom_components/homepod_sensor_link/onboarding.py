@@ -7,6 +7,8 @@ from homeassistant.core import HomeAssistant, State
 from collections.abc import AsyncIterator, Callable, Awaitable
 from datetime import datetime
 from zeroconf import ServiceStateChange, Zeroconf
+from zeroconf._dns import DNSQuestion
+from zeroconf._protocol.outgoing import DNSOutgoing
 from zeroconf.asyncio import AsyncZeroconf, AsyncServiceBrowser, AsyncServiceInfo
 
 
@@ -83,7 +85,7 @@ async def controller_session(hass: HomeAssistant) -> AsyncIterator[tuple[IpContr
             raise OSError("discovery_cleanup_failed") from None
 
 
-async def _discover_candidates(hass: HomeAssistant) -> dict[str, Data]:
+async def _discover_candidates(hass: HomeAssistant, hosts: list[str] | None = None) -> dict[str, Data]:
     """Actively browse before resolving, rather than snapshot a partial cache."""
     zc = await zeroconf.async_get_async_instance(hass)
     names: set[str] = set()
@@ -96,6 +98,14 @@ async def _discover_candidates(hass: HomeAssistant) -> dict[str, Data]:
 
     browser = AsyncServiceBrowser(zc.zeroconf, HAP_TYPE, handlers=[changed])
     try:
+        if hosts:
+            await zc.zeroconf.async_wait_for_start()
+            for host in hosts:
+                # Explicit unicast PTR queries have no known-answer section.
+                # Some peers answer these even when multicast browsing is partial.
+                query = DNSOutgoing(0, multicast=False)
+                query.add_question(DNSQuestion(HAP_TYPE, 12, 1))
+                zc.zeroconf.async_send(query, host, 5353)
         await asyncio.sleep(DISCOVERY_WINDOW)
     finally:
         await browser.async_cancel()
@@ -123,9 +133,9 @@ async def _discover_candidates(hass: HomeAssistant) -> dict[str, Data]:
     }
 
 
-async def discover_devices(hass: HomeAssistant) -> dict[str, Data]:
+async def discover_devices(hass: HomeAssistant, hosts: list[str] | None = None) -> dict[str, Data]:
     """Only public candidate metadata; pins always come from trusted records."""
-    found = await _discover_candidates(hass)
+    found = await _discover_candidates(hass, hosts)
     registry = dr.async_get(hass)
     for entry in hass.config_entries.async_entries("homekit_controller"):
         devices = dr.async_entries_for_config_entry(registry, entry.entry_id)
