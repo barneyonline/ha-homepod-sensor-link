@@ -13,6 +13,9 @@ from .credentials import _public
 from .engine import SafetyFailure
 
 MAX_IMPORT = 131072
+CONTROLLER_FIELDS = {"iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK"}
+PAIRING_FIELDS = CONTROLLER_FIELDS | {"AccessoryPairingID", "AccessoryLTPK"}
+TRANSPORT_FIELDS = {"AccessoryIP", "AccessoryIPs", "AccessoryPort", "Connection"}
 
 
 def _hex(value: str, length: int) -> str:
@@ -57,10 +60,22 @@ def parse_export(content: bytes | str) -> Data:
                     "AccessoryLTPK",
                 }:
                     raise ValueError
-            else:
-                if set(data) != {"controllers", "accessories"}:
-                    raise ValueError
+            elif set(data) == {"controllers", "accessories"}:
                 controllers, accessories = data["controllers"], data["accessories"]
+            else:
+                # aiohomekit exports are keyed by accessory ID. Endpoints are
+                # historical metadata, never trusted for identity or discovery.
+                if not 1 <= len(data) <= 64:
+                    raise ValueError
+                for identifier, record in data.items():
+                    if (
+                        not isinstance(record, dict)
+                        or set(record) - (PAIRING_FIELDS | TRANSPORT_FIELDS)
+                        or identifier.lower() != record["AccessoryPairingID"].lower()
+                    ):
+                        raise ValueError
+                    controllers.append({k: record[k] for k in CONTROLLER_FIELDS if k in record})
+                    accessories.append({k: record[k] for k in ("AccessoryPairingID", "AccessoryLTPK")})
         else:
             reader = csv.DictReader(io.StringIO(text))
             if not {"Account", "Password", "App / Group"} <= set(reader.fieldnames or []):

@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-11-08
 
+- Import aiohomekit pairing dictionaries keyed by accessory ID, validating their controller and accessory identities while ignoring historical network endpoints.
+- Actively browse for HomePod sensor services before listing setup candidates, allowing delayed mDNS responses and isolating stale or invalid services.
 - Select all discovered or resumable HomePods by default during setup and reconfiguration. Preserve the available submitted selection when correcting a validation error.
 
 ## 0.1.0 — 2026-11-08

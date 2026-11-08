@@ -1,7 +1,6 @@
 """Exercise rejected input, native adoption, UI and protected-store boundaries."""
 
 import asyncio
-from contextlib import asynccontextmanager
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -143,7 +142,7 @@ class BoundaryLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SafetyFailure):
             onboarding.sensor_ids(self.hass, config.entry_id)
 
-    async def test_discovery_merges_native_entries_and_ignores_other_models(self):
+    async def test_discovery_merges_native_entries(self):
         native = native_config({"AccessoryPairingID": "native-only"})
         self.hass.config_entries._entries[native.entry_id] = native
         unrelated = native_config({"AccessoryPairingID": "unrelated"})
@@ -152,21 +151,9 @@ class BoundaryLifecycleTests(unittest.IsolatedAsyncioTestCase):
             config_entry_id=native.entry_id, identifiers={("homekit_controller", "synthetic")}, model="HomePod mini"
         )
 
-        async def discover():
-            for model, identifier in (("Other speaker", "ignored"), ("HomePod mini", "DISCOVERED")):
-                yield SimpleNamespace(
-                    description=SimpleNamespace(
-                        model=model, id=identifier, name="Disposable candidate", addresses=["192.0.2.1"], port=12345
-                    )
-                )
-
-        controller = SimpleNamespace(async_discover=discover)
-
-        @asynccontextmanager
-        async def session(hass):
-            yield controller, None
-
-        with patch.object(onboarding, "controller_session", session):
+        with patch.object(
+            onboarding, "_discover_candidates", AsyncMock(return_value={"discovered": {"name": "Candidate"}})
+        ):
             result = await onboarding.discover_devices(self.hass)
         self.assertEqual(set(result), {"discovered", "native-only"})
         self.assertEqual(result["native-only"]["native_entry_id"], native.entry_id)

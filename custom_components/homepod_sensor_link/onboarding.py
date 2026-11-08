@@ -6,21 +6,28 @@ from .models import Data
 from homeassistant.core import HomeAssistant, State
 from collections.abc import AsyncIterator, Callable, Awaitable
 from datetime import datetime
-from zeroconf.asyncio import AsyncZeroconf
+from zeroconf import ServiceStateChange, Zeroconf
+from zeroconf.asyncio import AsyncZeroconf, AsyncServiceBrowser, AsyncServiceInfo
 
 
 from contextlib import asynccontextmanager
+import asyncio
 import math
 import sys
 
 from aiohomekit.characteristic_cache import CharacteristicCacheMemory
 from aiohomekit.controller.ip import IpController
+from aiohomekit.zeroconf import HomeKitService
 from homeassistant.components import zeroconf
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .backend import HomeKitBackend
 from .engine import INTERVAL, SafetyFailure
+
+DISCOVERY_WINDOW = 5
+DISCOVERY_RESOLVE_TIMEOUT = 3000
+HAP_TYPE = "_hap._tcp.local."
 
 
 def sensor_ids(hass: HomeAssistant, entry_id: str) -> list[str]:
@@ -76,17 +83,49 @@ async def controller_session(hass: HomeAssistant) -> AsyncIterator[tuple[IpContr
             raise OSError("discovery_cleanup_failed") from None
 
 
+async def _discover_candidates(hass: HomeAssistant) -> dict[str, Data]:
+    """Actively browse before resolving, rather than snapshot a partial cache."""
+    zc = await zeroconf.async_get_async_instance(hass)
+    names: set[str] = set()
+
+    def changed(zeroconf: Zeroconf, service_type: str, name: str, state_change: ServiceStateChange) -> None:
+        if state_change is ServiceStateChange.Removed:
+            names.discard(name)
+        else:
+            names.add(name)
+
+    browser = AsyncServiceBrowser(zc.zeroconf, HAP_TYPE, handlers=[changed])
+    try:
+        await asyncio.sleep(DISCOVERY_WINDOW)
+    finally:
+        await browser.async_cancel()
+
+    async def resolve(name: str) -> tuple[str, Data] | None:
+        try:
+            info = AsyncServiceInfo(HAP_TYPE, name)
+            if not await info.async_request(zc.zeroconf, DISCOVERY_RESOLVE_TIMEOUT):
+                return None
+            description = HomeKitService.from_service_info(info)
+            if not str(description.model).lower().startswith("homepod"):
+                return None
+            return description.id.lower(), {
+                "name": description.name,
+                "endpoint": HomeKitBackend._endpoint(description.addresses, description.port),
+            }
+        except (ValueError, OSError):
+            # One stale/unresolvable service must not hide healthy candidates.
+            return None
+
+    return {
+        result[0]: result[1]
+        for result in await asyncio.gather(*(resolve(name) for name in names))
+        if result is not None
+    }
+
+
 async def discover_devices(hass: HomeAssistant) -> dict[str, Data]:
     """Only public candidate metadata; pins always come from trusted records."""
-    found = {}
-    async with controller_session(hass) as (controller, _):
-        async for device in controller.async_discover():
-            description = device.description
-            if str(description.model).lower().startswith("homepod"):
-                found[description.id.lower()] = {
-                    "name": description.name,
-                    "endpoint": HomeKitBackend._endpoint(description.addresses, description.port),
-                }
+    found = await _discover_candidates(hass)
     registry = dr.async_get(hass)
     for entry in hass.config_entries.async_entries("homekit_controller"):
         devices = dr.async_entries_for_config_entry(registry, entry.entry_id)

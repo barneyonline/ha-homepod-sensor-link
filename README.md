@@ -53,6 +53,9 @@ Credential import requires a local HA administrator. HTTP import is accepted but
 <details>
 <summary>Setup, recovery and removal details</summary>
 
+- Credential import accepts selected HAP CSV rows, a single JSON credential record, `controllers`/`accessories` JSON bundles, and aiohomekit JSON dictionaries keyed by accessory ID. Dictionary records may include historical network fields; discovery supplies current endpoints and imported keys supply identity pins.
+- Setup actively browses for sensor services for five seconds, then resolves their current endpoints. A HomePod that does not advertise its sensor service may remain absent even when its AirPlay player is visible.
+
 - New devices use a dedicated User controller; existing native HomeKit sensor entities and history remain unchanged.
 - Recovery is optional per device and requires verified administrator credentials. Network/discovery failures never authorise pairing changes.
 - Removing a device deletes its owned credentials and recovery history. It does not revoke on-device pairings or delete native HomeKit entries/history.
