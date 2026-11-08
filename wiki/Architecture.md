@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/images/wiki/Architecture-dark.jpg">
   <source media="(prefers-color-scheme: light)" srcset="../docs/images/wiki/Architecture-light.jpg">
-  <img alt="HomePod Sensor Link — Architecture" src="../docs/images/wiki/Architecture-light.jpg" width="1800" height="600">
+  <img alt="HomePod Sensor Link — Architecture" src="../docs/images/wiki/Architecture-light.jpg" width="1800">
 </picture>
 
 # Architecture

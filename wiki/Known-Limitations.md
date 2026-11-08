@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/images/wiki/Known-Limitations-dark.jpg">
   <source media="(prefers-color-scheme: light)" srcset="../docs/images/wiki/Known-Limitations-light.jpg">
-  <img alt="HomePod Sensor Link — Known Limitations" src="../docs/images/wiki/Known-Limitations-light.jpg" width="1800" height="600">
+  <img alt="HomePod Sensor Link — Known Limitations" src="../docs/images/wiki/Known-Limitations-light.jpg" width="1800">
 </picture>
 
 # Known limitations and verification boundaries

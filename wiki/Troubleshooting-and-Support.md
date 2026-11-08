@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/images/wiki/Troubleshooting-and-Support-dark.jpg">
   <source media="(prefers-color-scheme: light)" srcset="../docs/images/wiki/Troubleshooting-and-Support-light.jpg">
-  <img alt="HomePod Sensor Link — Troubleshooting and Support" src="../docs/images/wiki/Troubleshooting-and-Support-light.jpg" width="1800" height="600">
+  <img alt="HomePod Sensor Link — Troubleshooting and Support" src="../docs/images/wiki/Troubleshooting-and-Support-light.jpg" width="1800">
 </picture>
 
 # Troubleshooting and support

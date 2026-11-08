@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/images/wiki/Repository-Standards-dark.jpg">
   <source media="(prefers-color-scheme: light)" srcset="../docs/images/wiki/Repository-Standards-light.jpg">
-  <img alt="HomePod Sensor Link — Repository Standards" src="../docs/images/wiki/Repository-Standards-light.jpg" width="1800" height="600">
+  <img alt="HomePod Sensor Link — Repository Standards" src="../docs/images/wiki/Repository-Standards-light.jpg" width="1800">
 </picture>
 
 # Alignment with the other integrations

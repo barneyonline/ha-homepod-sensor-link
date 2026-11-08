@@ -55,13 +55,14 @@ def banners(root):
 
 
 def banner_header(page, *, github):
+    # GitHub clamps width but retains an explicit height, so let height stay intrinsic.
     base = WIKI_IMAGES_URL if github else "../docs/images/wiki"
     alt = escape(f"HomePod Sensor Link — {page.replace('-', ' ')}", quote=True)
     return (
         "<picture>\n"
         f'  <source media="(prefers-color-scheme: dark)" srcset="{base}/{page}-dark.jpg">\n'
         f'  <source media="(prefers-color-scheme: light)" srcset="{base}/{page}-light.jpg">\n'
-        f'  <img alt="{alt}" src="{base}/{page}-light.jpg" width="1800" height="600">\n'
+        f'  <img alt="{alt}" src="{base}/{page}-light.jpg" width="1800">\n'
         "</picture>\n\n"
     )
 

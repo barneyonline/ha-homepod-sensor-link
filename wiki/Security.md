@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/images/wiki/Security-dark.jpg">
   <source media="(prefers-color-scheme: light)" srcset="../docs/images/wiki/Security-light.jpg">
-  <img alt="HomePod Sensor Link — Security" src="../docs/images/wiki/Security-light.jpg" width="1800" height="600">
+  <img alt="HomePod Sensor Link — Security" src="../docs/images/wiki/Security-light.jpg" width="1800">
 </picture>
 
 # Security and private data

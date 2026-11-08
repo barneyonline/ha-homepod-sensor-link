@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/images/wiki/Quality-Research-dark.jpg">
   <source media="(prefers-color-scheme: light)" srcset="../docs/images/wiki/Quality-Research-light.jpg">
-  <img alt="HomePod Sensor Link — Quality Research" src="../docs/images/wiki/Quality-Research-light.jpg" width="1800" height="600">
+  <img alt="HomePod Sensor Link — Quality Research" src="../docs/images/wiki/Quality-Research-light.jpg" width="1800">
 </picture>
 
 # Quality-scale research

@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/images/wiki/Credential-Extraction-dark.jpg">
   <source media="(prefers-color-scheme: light)" srcset="../docs/images/wiki/Credential-Extraction-light.jpg">
-  <img alt="HomePod Sensor Link — Credential Extraction" src="../docs/images/wiki/Credential-Extraction-light.jpg" width="1800" height="600">
+  <img alt="HomePod Sensor Link — Credential Extraction" src="../docs/images/wiki/Credential-Extraction-light.jpg" width="1800">
 </picture>
 
 # Explicit controller-key extraction guide

@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/images/wiki/Quality-and-Readiness-dark.jpg">
   <source media="(prefers-color-scheme: light)" srcset="../docs/images/wiki/Quality-and-Readiness-light.jpg">
-  <img alt="HomePod Sensor Link — Quality and Readiness" src="../docs/images/wiki/Quality-and-Readiness-light.jpg" width="1800" height="600">
+  <img alt="HomePod Sensor Link — Quality and Readiness" src="../docs/images/wiki/Quality-and-Readiness-light.jpg" width="1800">
 </picture>
 
 # Quality target and readiness gates
