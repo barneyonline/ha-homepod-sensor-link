@@ -18,6 +18,23 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  macos-helper:
+    name: macOS helper (synthetic only)
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compile and test without signing or accessing keychains
+        run: sh scripts/test_macos_homekit.sh
+      - name: Build the bundled helper without resolving packages
+        run: sh scripts/build_macos_homekit.sh "$RUNNER_TEMP/homepod-helper"
+      - name: Check harmless command-line modes
+        run: |
+          "$RUNNER_TEMP/homepod-helper/homekit-export" --help
+          "$RUNNER_TEMP/homepod-helper/homekit-export" --describe-query
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
