@@ -156,7 +156,7 @@ class Provisioner:
         self.vault, self.backend, self.clock, self.boot = vault, backend, clock, boot
 
     async def inspect(self, key: str, *, resume: bool = False) -> tuple[Record, Readings | None]:
-        record = self.vault.records()[key]
+        record = self.vault.record(key)
         if record.get("cancelled") and not resume:
             return record, None
         if resume:
@@ -226,7 +226,7 @@ class Provisioner:
         return record, values
 
     async def cancel(self, key: str) -> None:
-        record = self.vault.records()[key]
+        record = self.vault.record(key)
         record["cancelled"] = True
         record.pop("authorised_boot", None)
         await self.vault.put(key, record)

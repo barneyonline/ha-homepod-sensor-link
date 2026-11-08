@@ -21,7 +21,7 @@ jobs:
       with:
         fetch-depth: 0
         persist-credentials: false
-    - name: Build pinned upstream validator on HA 2026.10.0
+    - name: Build pinned upstream validator on HA 2026.11.0
       run: docker build --file devtools/Dockerfile.hacs --tag homepod-link-hacs .
     - name: Validate repository with HACS
       env:

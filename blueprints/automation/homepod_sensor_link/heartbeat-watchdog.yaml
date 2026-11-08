@@ -4,7 +4,7 @@ blueprint:
   domain: automation
   source_url: https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml
   homeassistant:
-    min_version: "2026.10.0"
+    min_version: "2026.11.0"
   input:
     monitored_entities:
       name: Sensor access diagnostic entities

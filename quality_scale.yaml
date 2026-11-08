@@ -89,7 +89,7 @@ rules:
     comment: "A real reauth route uses the local administrator import and preserves both pins, keys and repair history. Evidence: custom_components/homepod_sensor_link/config_flow.py, custom_components/homepod_sensor_link/coordinator.py, custom_components/homepod_sensor_link/provisioning.py, tests/test_quality_lifecycle.py, https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
   test-coverage:
     status: done
-    comment: "Every packaged Python module must have exactly 100% statement and branch coverage on both HA versions; no exclusions or tolerated misses. Evidence: custom_components/homepod_sensor_link/models.py, tests/test_tooling.py, CONTRIBUTING.md"
+    comment: "Every packaged Python module must have exactly 100% statement and branch coverage on the supported HA runtime; no exclusions or tolerated misses. Evidence: custom_components/homepod_sensor_link/models.py, tests/test_tooling.py, CONTRIBUTING.md"
   devices:
     status: done
     comment: "Owned devices carry Apple context and preserve foreign/native registry records; no invented firmware metadata. Evidence: custom_components/homepod_sensor_link/entity.py, custom_components/homepod_sensor_link/sensor.py, tests/test_runtime_completion.py, https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"

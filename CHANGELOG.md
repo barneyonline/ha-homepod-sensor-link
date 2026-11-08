@@ -2,6 +2,10 @@
 
 ## Unreleased — 2.0.0 development
 
+- Serialize credential uploads per grant with cancellation-safe retries; clarify restart grace and preserve unconditional durable pairing checkpoints.
+- Skip journal saves for administrator audits that are not due, copy only selected credential records, and publish fresh measurements to their device before the final health update.
+- Clear removed-device notifications and listener bookkeeping, and support re-adding the same device without reloading healthy peers. Add deterministic 1/16/64-device publication and protected-storage benchmarks.
+- Require Home Assistant 2026.11.0 or newer, use entry-linked Repairs directly, and align validation, coverage reporting and Marketplace documentation with that minimum.
 - Introduce **HomePod Sensor Link**, domain `homepod_sensor_link`, intended repository `ha-homepod-sensor-link`.
 - Add discovery, local administrator credential import, bounded identity matching and dedicated User-controller setup for new integration-owned measurements.
 - Adopt existing native HomeKit sensors without changing their identity/history; preserve add-only pairing safety and the v1.1.1 aiohomekit cleanup classification fix.

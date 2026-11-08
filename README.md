@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations"><img src="https://img.shields.io/badge/development-experimental-orange" alt="Experimental development"></a>
-  <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"><img src="https://img.shields.io/badge/Home_Assistant-2026.10%2B-41BDF5?logo=homeassistant&amp;logoColor=white" alt="Home Assistant 2026.10 or newer"></a>
+  <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"><img src="https://img.shields.io/badge/Home_Assistant-2026.11%2B-41BDF5?logo=homeassistant&amp;logoColor=white" alt="Home Assistant 2026.11 or newer"></a>
   <a href="#get-started"><img src="https://img.shields.io/badge/install-HA_Marketplace-41BDF5" alt="Install through Home Assistant Marketplace"></a>
 </p>
 
@@ -40,10 +40,10 @@
 3. Open **HomePod Sensor Link**, select **Install**, review the version, and confirm. Follow any restart prompt. There is no published release yet: a `main`/default-branch version is a development build.
 4. Continue the setup prompt, or open **Settings → Devices & services → Add integration → HomePod Sensor Link**. Select your devices and recovery policy, then follow the local credential-import link.
 
-On **HA 2026.10**, [open the repository in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=barneyonline&repository=ha-homepod-sensor-link&category=integration), add it as an **Integration**, download it and restart HA. See the [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) for detailed installation steps. [HA’s Marketplace instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories).
+See the [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) for detailed installation steps and [HA’s Marketplace instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories) for adding custom repositories.
 <!-- ha-marketplace:exclude-end -->
 
-Requires **Home Assistant 2026.10.0+** (Python **3.14+**).
+Requires **Home Assistant 2026.11.0+** (Python **3.14+**).
 
 See the [Wiki](https://github.com/barneyonline/ha-homepod-sensor-link/wiki) for [setup](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started), [using the integration](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration), [automation examples](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Automation-Examples) and [troubleshooting](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Troubleshooting-and-Support).
 
@@ -69,7 +69,7 @@ sh scripts/validate.sh
 python3 scripts/package.py --output /tmp/homepod-sensor-link-local.zip
 ```
 
-Automated tests cover HA **2026.10.0** and **2026.11.0** with aiohomekit **4.0.1**. Validation requires **100% Python statements/branches per integration module**, **100% JavaScript lines/branches/functions**, strict typing, hassfest, Ruff and repository/wiki checks. Codecov reports the Python integration coverage; JavaScript is gated separately.
+Automated tests run on HA **2026.11.0** with aiohomekit **4.0.1**. Validation requires **100% Python statements/branches per integration module**, **100% JavaScript lines/branches/functions**, strict typing, hassfest, Ruff and repository/wiki checks. Codecov reports the Python integration coverage; JavaScript is gated separately.
 
 See [contributing](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md), [development](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Development-Environment), [validation evidence](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/validate.yml) and the [Platinum engineering target](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md#quality-checks). A target is not an awarded Home Assistant quality tier; extraction and real-device verification remain outstanding.
 

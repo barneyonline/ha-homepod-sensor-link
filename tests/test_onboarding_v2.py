@@ -129,8 +129,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         self.hass = HomeAssistant(self.directory.name)
         self.hass.config_entries = ConfigEntries(self.hass, {})
         await self.hass.config_entries.async_initialize()
-        if hasattr(dr, "async_setup"):
-            dr.async_setup(self.hass)
+        dr.async_setup(self.hass)
         await dr.async_load(self.hass)
         await er.async_load(self.hass)
         self.hass.state = CoreState.running

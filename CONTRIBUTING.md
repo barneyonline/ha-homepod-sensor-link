@@ -12,7 +12,7 @@ Run the complete local gate before submitting changes:
 sh scripts/validate.sh
 ```
 
-The deliberate matrix is **HA 2026.10.0 and 2026.11.0**, with **aiohomekit 4.0.1** and **Python 3.14**. Docker is required. Runtime tests mount source read-only and run with networking disabled. Reports are written outside the repository. Public tooling downloads during image construction are separate from test execution. Pinned versions live in `devtools/validation.json` and the two `devtools/requirements-*.txt` files.
+The minimum and tested runtime is **HA 2026.11.0**, with **aiohomekit 4.0.1** and **Python 3.14**. Docker is required. Runtime tests mount source read-only and run with networking disabled. Reports are written outside the repository. Public tooling downloads during image construction are separate from test execution. Pinned versions live in `devtools/validation.json` and the two `devtools/requirements-*.txt` files.
 
 Focused commands:
 
@@ -29,6 +29,8 @@ Add meaningful behavioural tests for changes. Every integration module must reta
 Preserve fresh five-minute authentication checks, the ten-minute startup grace, three confirmed authentication failures spanning ten minutes, one repair attempt per hour and three per rolling day. Pending native reloads persist and retry at most three times per rolling hour. Network/discovery and cleanup-only failures cannot authorise repair. Keep the real aiohomekit connector cleanup classification/cancellation regressions.
 
 Preserve identity and permission pins, add-only pairing-table checks, persist-before-write transactions, interrupted setup/Resume, foreign/native entity history and safe removal. New devices use dedicated User controllers. Recovery defaults on per device and requires verified administrator credentials. Removal automatically deletes owned credentials and recovery history; it does not revoke on-device pairings or remove native sensors. No legacy migration or compatibility package is included.
+
+Performance regressions use deterministic operation counts in `tests/test_performance_storage.py` and `tests/test_performance_publication.py`: seven simulated days of administrator audits, protected-file writes/fsyncs, isolated 64-record reads, and actual HA entity reports at 1, 16 and 64 devices. Measurements publish synchronously to the selected device before fresh-report verification; the final coordinator broadcast still updates health and inventory. Skipped administrator audits need no journal commit. Attempt reservations and pairing checkpoints must always validate and durably write protected storage, even when memory appears unchanged. Keep fresh authentication and verification work; do not replace it with cached success.
 
 ## Dependencies
 
@@ -63,7 +65,7 @@ Keep [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md), README links and 
 
 ## Automation
 
-CI uses read-only repository access for validation, package and coverage jobs. The isolated Codecov job receives `CODECOV_TOKEN` only after successful validation on trusted `main` and uploads the two Python coverage reports. Pull-request validation does not receive that secret. Four metadata jobs use scoped issue/PR permissions and trusted-main code; manual dispatch only previews changes. The `pull_request_target` workflow never executes PR-head code.
+CI uses read-only repository access for validation, package and coverage jobs. The isolated Codecov job receives `CODECOV_TOKEN` only after successful validation on trusted `main` and uploads the HA runtime’s Python coverage report. Pull-request validation does not receive that secret. Four metadata jobs use scoped issue/PR permissions and trusted-main code; manual dispatch only previews changes. The `pull_request_target` workflow never executes PR-head code.
 
 `release-candidate.yml` builds a scanned development artifact with checksum and exact clean source provenance. `release-assets.yml` downloads and independently verifies it. Neither creates tags, publishes releases or deploys. Wiki publication is a separate authorised operation. Workflow definitions, metadata policy and tests document the implementation.
 

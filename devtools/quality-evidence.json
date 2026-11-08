@@ -264,7 +264,7 @@
       "docs": [
         "CONTRIBUTING.md"
       ],
-      "comment": "Every packaged Python module must have exactly 100% statement and branch coverage on both HA versions; no exclusions or tolerated misses."
+      "comment": "Every packaged Python module must have exactly 100% statement and branch coverage on the supported HA runtime; no exclusions or tolerated misses."
     },
     "devices": {
       "code": [
@@ -711,7 +711,7 @@
     },
     "hosted-ci": {
       "status": "done",
-      "comment": "GitHub Actions successfully ran both pinned offline HA suites, exact coverage, strict typing, hassfest, formatting and JavaScript coverage on the published implementation commit. This does not establish hardware or release readiness.",
+      "comment": "GitHub Actions successfully ran the pinned offline HA validation, exact coverage, strict typing, hassfest, formatting and JavaScript coverage on the published implementation commit. This does not establish hardware or release readiness.",
       "evidence": [
         "https://github.com/barneyonline/ha-homepod-sensor-link/actions/runs/42424449553",
         "https://github.com/barneyonline/ha-homepod-sensor-link/commit/3b4c407d75ab023927ef651f1579bdde19c1327c"

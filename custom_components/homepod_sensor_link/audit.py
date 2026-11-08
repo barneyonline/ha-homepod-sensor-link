@@ -58,5 +58,7 @@ class RecoveryAudit:
                 return []
             async with asyncio.TaskGroup() as group:
                 tasks = [group.create_task(self._device(target, force)) for target in self.engine.targets]
-            await self.save(self.engine.snapshot())
-            return [result for task in tasks if (result := task.result()) is not None]
+            results = [result for task in tasks if (result := task.result()) is not None]
+            if results:
+                await self.save(self.engine.snapshot())
+            return results

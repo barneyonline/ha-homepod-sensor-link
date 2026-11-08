@@ -72,7 +72,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: barneyonline/ha-homepod-sensor-link
-          files: coverage/2026.10.0/coverage.xml,coverage/2026.11.0/coverage.xml
+          files: coverage/2026.11.0/coverage.xml
           disable_search: true
           disable_file_fixes: true
           disable_safe_directory: true

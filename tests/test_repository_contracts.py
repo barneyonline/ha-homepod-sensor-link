@@ -215,7 +215,14 @@ class RepositoryContractTests(unittest.TestCase):
 
     def test_deliberate_runtime_inventory_matches_hacs(self):
         config = json.loads((ROOT / "devtools/validation.json").read_text())
-        self.assertEqual(config["home_assistant"], ["2026.10.0", "2026.11.0"])
+        self.assertEqual(config["home_assistant"], ["2026.11.0"])
+        self.assertEqual(set(config["coverage"]), set(config["home_assistant"]))
+        blueprint = yaml.safe_load(
+            (ROOT / "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml")
+            .read_text()
+            .replace("!input monitored_entities", "[]")
+        )
+        self.assertEqual(blueprint["blueprint"]["homeassistant"]["min_version"], config["home_assistant"][0])
         self.assertEqual(config["aiohomekit"], "4.0.1")
         for version in config["home_assistant"]:
             self.assertTrue(re.fullmatch(r"\d{4}\.\d+\.\d+", version))

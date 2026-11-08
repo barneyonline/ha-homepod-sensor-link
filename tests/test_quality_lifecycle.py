@@ -4,7 +4,6 @@ from copy import deepcopy
 import json
 import unittest
 from unittest.mock import Mock, patch
-from custom_components.homepod_sensor_link import repairs
 
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.config_entries import ConfigEntry
@@ -26,16 +25,6 @@ class QualityLifecycleTests(unittest.IsolatedAsyncioTestCase):
     make_runtime = fixtures.OnboardingTests.make_runtime
     flow_environment = fixtures.OnboardingTests.flow_environment
     finish_flow = fixtures.OnboardingTests.finish_flow
-
-    async def test_repairs_adapter_supports_both_public_api_signatures(self):
-        for supported in (False, True):
-            with (
-                patch.object(repairs, "SUPPORTS_ENTRY_LINK", supported),
-                patch.object(repairs.ir, "async_create_issue") as create,
-            ):
-                repairs.create_issue(self.hass, "synthetic", "sensor_access", "entry", ir.IssueSeverity.ERROR)
-                self.assertEqual(create.call_args.args[1:], (DOMAIN, "synthetic"))
-                self.assertEqual("config_entry_id" in create.call_args.kwargs, supported)
 
     def flow(self, config, source="reauth"):
         flow = HomePodSensorLinkFlow()
@@ -97,7 +86,12 @@ class QualityLifecycleTests(unittest.IsolatedAsyncioTestCase):
         try:
             await runtime.notify(self.target, state, False)
             registry = ir.async_get(self.hass)
-            self.assertIsNotNone(registry.async_get_issue(DOMAIN, "access_" + self.key))
+            issue = registry.async_get_issue(DOMAIN, "access_" + self.key)
+            self.assertIsNotNone(issue)
+            self.assertEqual(issue.config_entry_id, config.entry_id)
+            self.assertEqual(issue.translation_key, "sensor_access")
+            self.assertEqual(issue.severity, ir.IssueSeverity.ERROR)
+            self.assertFalse(issue.is_fixable)
             await runtime.stop()
             self.assertIsNotNone(registry.async_get_issue(DOMAIN, "access_" + self.key))
             state.status = "healthy"

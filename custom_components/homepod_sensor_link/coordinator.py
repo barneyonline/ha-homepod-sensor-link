@@ -110,6 +110,7 @@ class Runtime:
         self.notifications: dict[str, tuple[Any, ...]] = {}
         self.readings: dict[str, tuple[datetime, Readings]] = {}
         self.entities: dict[str, dict[str, str]] = {}
+        self.measurement_listeners: dict[str, set[Callable[[], None]]] = {}
         self.pending_tasks: dict[str, asyncio.Task[tuple[Record, Readings | None]]] = {}
         self.records: dict[str, Record] = {}
         self.stopped = self.closed = False
@@ -234,12 +235,28 @@ class Runtime:
         self.coordinator.async_set_updated_data(self.engine.snapshot())
 
     def publish(self, target: Target, values: Readings) -> None:
-        self.readings[target["entry_id"]] = (dt_util.utcnow(), values)
-        self.coordinator.async_set_updated_data(self.engine.snapshot())
+        key = target["entry_id"]
+        self.readings[key] = (dt_util.utcnow(), values)
+        # Report this device synchronously before verify_native checks HA's
+        # last_reported timestamps. The final coordinator update publishes
+        # health/inventory once, without an inventory-wide broadcast per read.
+        for listener in tuple(self.measurement_listeners.get(key, ())):
+            listener()
+
+    def listen_measurements(self, key: str, listener: Callable[[], None]) -> Callable[[], None]:
+        listeners = self.measurement_listeners.setdefault(key, set())
+        listeners.add(listener)
+
+        def unsubscribe() -> None:
+            listeners.discard(listener)
+            if not listeners and self.measurement_listeners.get(key) is listeners:
+                self.measurement_listeners.pop(key, None)
+
+        return unsubscribe
 
     async def persist_pairing_checkpoint(self, target: Target) -> None:
         key = target["entry_id"]
-        record = cast(Vault, self.vault).records()[key]
+        record = cast(Vault, self.vault).record(key)
         record["target"] = deepcopy(target)
         await cast(Vault, self.vault).put(key, record)
         self.records[key] = record
@@ -420,7 +437,7 @@ class Runtime:
             await asyncio.gather(task, return_exceptions=True)
         async with self.engine.lock:
             await self.provisioner.cancel(key)
-            self.records[key] = cast(Vault, self.vault).records()[key]
+            self.records[key] = cast(Vault, self.vault).record(key)
             self.sync_targets()
         self.coordinator.async_set_updated_data(self.engine.snapshot())
 
@@ -450,6 +467,11 @@ class Runtime:
             self.engine.states.pop(key, None)
             self.readings.pop(key, None)
             self.entities.pop(key, None)
+            self.measurement_listeners.pop(key, None)
+            self.notifications.pop(key, None)
+            self.notifications.pop("access_" + key, None)
+            for suffix in (key, key + "_recovered", "access_" + key):
+                persistent_notification.async_dismiss(self.hass, "homepod_sensor_link_" + suffix)
             self.sync_targets()
             await cast(Vault, self.vault).remove(key)
             self.saved.pop(key, None)
@@ -544,6 +566,7 @@ class Runtime:
             self._runtime_listener()
             self._runtime_listener = None
         await self.coordinator.async_shutdown()
+        self.measurement_listeners.clear()
         if hasattr(self, "engine"):
             async with self.engine.lock:
                 await cast(Callable[[], Awaitable[None]], self.controller.async_stop)()

@@ -100,6 +100,10 @@ class Vault:
     def records(self) -> dict[str, Record]:
         return deepcopy(self.data["records"])
 
+    def record(self, key: str) -> Record:
+        """Return an isolated device without copying unrelated credentials."""
+        return deepcopy(self.data["records"][key])
+
     async def _commit(self, data: Data) -> None:
         # Drain atomic I/O even when the caller is cancelled. Otherwise a
         # cancelled worker could recreate credentials after removal purges them.

@@ -27,6 +27,7 @@ async def async_setup_entry(
     @callback
     def add_devices() -> None:
         entities: list[DeviceSensor] = []
+        known.intersection_update(target["entry_id"] for target in runtime.targets)
         for target in runtime.targets:
             if target["entry_id"] in known:
                 continue
@@ -76,6 +77,7 @@ class Measurement(DeviceSensor):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self.runtime.entities.setdefault(self.key, {})[self.kind] = self.entity_id
+        self.async_on_remove(self.runtime.listen_measurements(self.key, self.async_write_ha_state))
 
     async def async_will_remove_from_hass(self) -> None:
         self.runtime.entities.get(self.key, {}).pop(self.kind, None)

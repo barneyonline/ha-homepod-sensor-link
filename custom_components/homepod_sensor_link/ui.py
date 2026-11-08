@@ -90,6 +90,9 @@ class ImportView(HomeAssistantView):
             return self.json({"error": "local_admin_import_required"}, status_code=403)
         if "data" in grant:
             return self.json({"error": "already_imported"}, status_code=409)
+        if grant.get("uploading"):
+            return self.json({"error": "import_in_progress"}, status_code=409)
+        grant["uploading"] = True
         try:
             content = bytearray()
             async with asyncio.timeout(15):
@@ -113,6 +116,8 @@ class ImportView(HomeAssistantView):
             )
         except Exception:
             return self.json({"error": "invalid_or_expired_export"}, status_code=400)
+        finally:
+            grant.pop("uploading", None)
 
 
 async def setup_ui(hass: HomeAssistant) -> None:

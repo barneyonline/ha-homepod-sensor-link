@@ -26,9 +26,13 @@ FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".zip", ".log"}
 
 # Exact public registry digests verified for workflow tooling on 8 November 2026.
 # Only complete references are recognised; unknown digests and bare hashes still fail.
+# Historical pins remain necessary for auditing reachable Git history.
 PUBLIC_IMAGE_PINS = {
     "python:3.14-slim@sha256:" + "af8a5aa14780025dbfbcfbc81bd8a91e" + "bd87711dd5b0f48ed71090949dd7cb1d",
     "ghcr.io/hacs/action@sha256:" + "a0336b447da4500204122cabea01cac1" + "e0992840d8b927535782ddd5b601f698",
+    "ghcr.io/home-assistant/home-assistant@sha256:"
+    + "c6c1ca9931036bf3a2c4cc088d8db25dfea"
+    + "3b33935a5ecc83c40349462e2f69e",
     "ghcr.io/home-assistant/home-assistant@sha256:"
     + "1b64d38f38d922bf9d59336451fd6453"
     + "e1d614f934456af4ee3d2a51061be3a4",
