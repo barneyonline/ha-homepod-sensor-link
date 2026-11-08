@@ -26,6 +26,7 @@
 ## Key features
 
 - **Climate sensors:** temperature and humidity from one or more selected HomePods.
+- **Friendly device names:** use uniquely matched AirPlay names during discovery and integration reloads. Manual names stay in place; unavailable or ambiguous matches keep the current name.
 - **Guided setup:** discover devices, import authorised controller credentials, or adopt existing native HomeKit sensors without changing their entities or history.
 - **Connection monitoring:** fresh authenticated checks, sensor freshness, diagnostics and administrator-access audits.
 - **Optional recovery:** on by default per device, with pinned identities, pairing-preservation checks and persisted repair limits.

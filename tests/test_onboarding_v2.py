@@ -116,6 +116,13 @@ class Request(dict):
 
 class OnboardingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        for path in (
+            "custom_components.homepod_sensor_link.onboarding.discover_airplay",
+            "custom_components.homepod_sensor_link.refresh_names",
+        ):
+            boundary = patch(path, AsyncMock(return_value=[]))
+            boundary.start()
+            self.addCleanup(boundary.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.hass = HomeAssistant(self.directory.name)

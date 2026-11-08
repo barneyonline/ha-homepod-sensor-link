@@ -26,6 +26,19 @@ def packet(*, name="Device._hap._tcp.local.", text=True, ttl=120, address=True):
 
 
 class PacketTests(unittest.TestCase):
+    def test_airplay_replies_are_parsed_only_for_the_requested_service_type(self):
+        kind = "_airplay._tcp.local."
+        name = "Test Room." + kind
+        info = ServiceInfo(kind, name, properties={"model": "AudioAccessory5,1"})
+        outgoing = DNSOutgoing(0x8400, multicast=False)
+        outgoing.add_answer_at_time(DNSService(name, 33, 1, 120, 0, 0, 7000, "device.local."), 0)
+        outgoing.add_answer_at_time(DNSText(name, 16, 1, 120, info.text), 0)
+        outgoing.add_answer_at_time(DNSAddress("device.local.", 1, 1, 120, socket.inet_aton("192.0.2.1")), 0)
+        reply = outgoing.packets()[0]
+        self.assertEqual(discovery.service_infos(reply), [])
+        self.assertEqual(discovery.service_infos(reply, kind)[0].name, name)
+        self.assertEqual(discovery.service_infos(reply, kind)[0].decoded_properties["model"], "AudioAccessory5,1")
+
     def test_complete_reply_preserves_current_port_and_advertised_address(self):
         infos = discovery.service_infos(packet())
         self.assertEqual(len(infos), 1)

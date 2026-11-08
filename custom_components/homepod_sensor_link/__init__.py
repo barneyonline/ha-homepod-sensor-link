@@ -16,6 +16,7 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.storage import Store
 from .repairs import create_issue
 from .models import Data
+from .onboarding import refresh_names
 from .credentials import DOMAIN, public_targets
 from .engine import SafetyFailure
 from .vault import get_vault, Vault, VaultStates
@@ -90,6 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomePodConfigEntry) -> b
         await cast(Callable[[], Awaitable[None]], controller.async_start)()
         runtime = Runtime(hass, entry, targets, controller, zc, vault)
         await runtime.initialize()
+        await refresh_names(hass, runtime.records, vault)
         entry.runtime_data = runtime
         await runtime.preflight()
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

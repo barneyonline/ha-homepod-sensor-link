@@ -25,6 +25,8 @@ from homeassistant.util import dt as dt_util
 from .directed_discovery import discover_hosts
 from .backend import HomeKitBackend
 from .engine import INTERVAL, SafetyFailure
+from .names import discover_airplay, confirmed_names
+from .vault import Vault
 
 DISCOVERY_WINDOW = 5
 DISCOVERY_RESOLVE_TIMEOUT = 3000
@@ -133,7 +135,10 @@ async def _discover_candidates(hass: HomeAssistant, hosts: list[str] | None = No
 
 async def discover_devices(hass: HomeAssistant, hosts: list[str] | None = None) -> dict[str, Data]:
     """Only public candidate metadata; pins always come from trusted records."""
-    found = await _discover_candidates(hass, hosts)
+    # Browser results may come from HA's cache. Confirm proposed associations
+    # from fresh wire replies before using addresses to change a device name.
+    found, services = await asyncio.gather(_discover_candidates(hass, hosts), discover_airplay(hass))
+    names = await confirmed_names(found, services)
     registry = dr.async_get(hass)
     for entry in hass.config_entries.async_entries("homekit_controller"):
         devices = dr.async_entries_for_config_entry(registry, entry.entry_id)
@@ -143,4 +148,19 @@ async def discover_devices(hass: HomeAssistant, hosts: list[str] | None = None) 
         ):
             identifier = str(entry.data["AccessoryPairingID"]).lower()
             found[identifier] = {"name": entry.title, "native_entry_id": entry.entry_id}
+    for identifier, name in names.items():
+        found[identifier].update(name=name, friendly_name=name)
     return found
+
+
+async def refresh_names(hass: HomeAssistant, records: dict[str, Data], vault: Vault) -> None:
+    """Refresh existing devices on setup, retaining their last name on failure."""
+    try:
+        discovered = await discover_devices(hass)
+    except Exception:
+        return
+    for key, record in records.items():
+        name = discovered.get(record["target"]["accessory_id"].lower(), {}).get("friendly_name")
+        if name and name != record.get("name"):
+            record["name"] = name
+            await vault.put(key, record)
