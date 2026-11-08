@@ -148,12 +148,21 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
         for name in (
             "user",
             "devices",
+            "no_devices",
+            "discovery_failed",
             "policy",
             "credentials",
+            "import_missing",
             "credential_export",
             "credential_manual",
             "finish",
             "manage",
+            "manage_actions",
+            "manage_resume",
+            "manage_cancel",
+            "manage_recovery_on",
+            "manage_recovery_off",
+            "manage_remove",
             "reconfigure",
         ):
             with self.subTest(step=name):
@@ -219,14 +228,51 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(result["errors"], {"base": "select_devices"})
                         self.assertEqual(result["data_schema"]({})["devices"], expected)
 
-    async def test_empty_discovery_has_empty_default_and_can_retry(self):
-        flow = self.flow()
+    async def test_empty_discovery_offers_retry_instead_of_empty_selector(self):
         async with self.flow_environment():
-            with patch.object(flow_module, "discover_devices", AsyncMock(return_value={})):
-                result = await flow.async_step_devices()
-                self.assertEqual(result["data_schema"]({})["devices"], [])
+            for source in ("user", "reconfigure"):
+                for submitted in (None, {}, {"devices": [self.target["accessory_id"]]}):
+                    with self.subTest(source=source, submitted=submitted):
+                        flow = self.flow(source)
+                        with patch.object(flow_module, "discover_devices", AsyncMock(return_value={})):
+                            result = await flow.async_step_devices(submitted)
+                        self.assertEqual(result["type"], FlowResultType.MENU)
+                        self.assertEqual(result["step_id"], "no_devices")
+                        self.assertEqual(result["menu_options"], ["devices", "import_missing"])
+                        self.assertEqual(flow._selected, [])
+                        retry = result["data_schema"]({"next_step_id": "devices"})
+                        result = await getattr(flow, "async_step_" + retry["next_step_id"])()
+                        self.assertEqual(result["step_id"], "devices")
+                        self.assertEqual(result["data_schema"]({})["devices"], [self.target["accessory_id"]])
+
+    async def test_empty_discovery_failure_is_distinct_and_can_retry(self):
+        async with self.flow_environment():
+            flow = self.flow()
+            with patch.object(flow_module, "discover_devices", AsyncMock(side_effect=OSError("private details"))):
+                for submitted in (None, {"devices": []}):
+                    result = await flow.async_step_devices(submitted)
+                    self.assertEqual(result["type"], FlowResultType.MENU)
+                    self.assertEqual(result["step_id"], "discovery_failed")
+                    self.assertEqual(result["menu_options"], ["devices", "import_missing"])
+                    self.assertNotIn("private details", str(result))
+            self.assertEqual((await flow.async_step_devices())["step_id"], "devices")
+
+    async def test_only_active_devices_shows_empty_state_and_export_can_find_missing_devices(self):
+        active = deepcopy(self.record)
+        active["phase"] = "active"
+        await self.vault.put(self.key, active)
+        async with self.flow_environment():
+            flow = self.flow("reconfigure")
             result = await flow.async_step_devices()
-            self.assertEqual(result["data_schema"]({})["devices"], [self.target["accessory_id"]])
+            self.assertEqual(result["step_id"], "no_devices")
+            choice = result["data_schema"]({"next_step_id": "import_missing"})
+            result = await getattr(flow, "async_step_" + choice["next_step_id"])()
+            self.assertEqual(result["step_id"], "credential_export")
+            found = {"missing-homepod": {"name": "Missing HomePod"}}
+            with patch.object(flow_module, "discover_devices", AsyncMock(return_value=found)):
+                result = await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+            self.assertEqual(result["step_id"], "devices")
+            self.assertEqual(result["data_schema"]({})["devices"], ["missing-homepod"])
 
     async def test_monitor_only_native_setup_needs_no_export(self):
         target, source_entry = fixture()
@@ -287,26 +333,52 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
             flow._committed = True
             flow.async_remove()
 
-    async def test_manage_dispatch_validation_pending_import_and_failure(self):
+    async def managed_flow(self, config):
+        flow = self.flow("reconfigure", config)
+        result = await flow.async_step_manage({"device": self.key})
+        self.assertEqual(result["type"], FlowResultType.MENU)
+        return flow
+
+    async def test_manage_selects_device_before_contextual_menu_without_mutation(self):
+        config, runtime = await self.make_runtime()
+        try:
+            with patch.object(runtime, "remove_device", AsyncMock()) as remove:
+                async with self.flow_environment():
+                    flow = self.flow("reconfigure", config)
+                    self.assertEqual((await flow.async_step_reconfigure())["type"], FlowResultType.MENU)
+                    runtime.records["foreign"] = deepcopy(runtime.records[self.key])
+                    form = await flow.async_step_manage()
+                    self.assertEqual(form["step_id"], "manage")
+                    self.assertFalse(form["last_step"])
+                    fields = form["data_schema"].schema
+                    self.assertEqual(list(fields), ["device"])
+                    self.assertEqual(fields["device"].config["mode"], "dropdown")
+                    self.assertEqual([o["value"] for o in fields["device"].config["options"]], [self.key])
+                    for invalid in ({}, {"device": "foreign"}):
+                        self.assertEqual((await flow.async_step_manage(invalid))["reason"], "invalid_selection")
+                    menu = await flow.async_step_manage({"device": self.key, "action": "remove"})
+                    self.assertEqual(menu["step_id"], "manage_actions")
+                    self.assertEqual(menu["description_placeholders"], {"name": runtime.records[self.key]["name"]})
+                    self.assertEqual(
+                        menu["menu_options"],
+                        ["manage_resume", "manage_cancel", "manage_recovery_off", "manage_remove", "manage"],
+                    )
+                    runtime.records[self.key]["target"]["recovery"] = False
+                    menu = await flow.async_step_manage_actions()
+                    self.assertIn("manage_recovery_on", menu["menu_options"])
+                    self.assertNotIn("manage_recovery_off", menu["menu_options"])
+                    await flow.async_step_manage()
+                    self.assertIsNone(flow._managed_device)
+                    self.assertEqual((await flow.async_step_manage_actions())["reason"], "invalid_selection")
+                    remove.assert_not_awaited()
+        finally:
+            runtime.records.pop("foreign", None)
+            await runtime.stop()
+
+    async def test_manage_actions_review_before_dispatch_and_removal_requires_confirmation(self):
         config, runtime = await self.make_runtime()
         try:
             async with self.flow_environment():
-                self.assertEqual(
-                    (await self.flow("reconfigure", config).async_step_reconfigure())["type"], FlowResultType.MENU
-                )
-                self.assertEqual((await self.flow("reconfigure", config).async_step_manage())["step_id"], "manage")
-                self.assertEqual(
-                    (
-                        await self.flow("reconfigure", config).async_step_manage(
-                            {"device": "foreign", "action": "remove"}
-                        )
-                    )["reason"],
-                    "invalid_selection",
-                )
-                malformed = await self.flow("reconfigure", config).async_step_manage(
-                    {"device": self.key, "action": "unknown"}
-                )
-                self.assertEqual(malformed["errors"], {"base": "device_action_failed"})
                 for action, method, args in (
                     ("resume", "resume_device", (self.key,)),
                     ("cancel", "cancel_device", (self.key,)),
@@ -318,39 +390,115 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.subTest(action=action),
                         patch.object(runtime, method, AsyncMock(return_value=True)) as call,
                     ):
-                        result = await self.flow("reconfigure", config).async_step_manage(
-                            {"device": self.key, "action": action}
-                        )
+                        flow = await self.managed_flow(config)
+                        step = getattr(flow, "async_step_manage_" + action)
+                        result = await step()
+                        self.assertEqual(result["step_id"], "manage_" + action)
+                        self.assertEqual(result["type"], FlowResultType.FORM)
+                        call.assert_not_awaited()
+                        if action == "remove":
+                            for unconfirmed in ({}, {"confirm": False}):
+                                result = await step(unconfirmed)
+                                self.assertEqual(result["errors"], {"base": "confirm_removal"})
+                                call.assert_not_awaited()
+                        result = await step({"confirm": True, "device": "foreign"})
                         self.assertEqual(result["reason"], "device_updated")
                         call.assert_awaited_once_with(*args)
-                runtime.records[self.key]["phase"] = "blocked"
-                result = await self.flow("reconfigure", config).async_step_manage(
-                    {"device": self.key, "action": "resume"}
-                )
-                self.assertEqual(result["errors"], {"base": "safety_blocked"})
-                runtime.records[self.key]["phase"] = "needs_credentials"
-                runtime.records[self.key]["target"]["recovery"] = False
-                result = await self.flow("reconfigure", config).async_step_manage(
-                    {"device": self.key, "action": "resume"}
-                )
-                self.assertEqual(result["step_id"], "credentials")
-                runtime.records[self.key]["target"]["recovery"] = True
-                runtime.records[self.key]["phase"] = "active"
-                for enabled in (False, True):
-                    with patch.object(runtime, "set_recovery", AsyncMock(return_value=False)):
-                        result = await self.flow("reconfigure", config).async_step_manage(
-                            {"device": self.key, "action": "recovery_on"}
-                        )
-                        self.assertEqual(result["step_id"], "credentials")
-                with patch.object(runtime, "remove_device", AsyncMock(side_effect=OSError())):
-                    result = await self.flow("reconfigure", config).async_step_manage(
-                        {"device": self.key, "action": "remove"}
-                    )
-                    self.assertEqual(result["errors"], {"base": "device_action_failed"})
-                runtime.stopped = True
+        finally:
+            await runtime.stop()
+
+    async def test_manage_revalidates_device_runtime_and_owner_at_every_step(self):
+        config, runtime = await self.make_runtime()
+        try:
+            async with self.flow_environment():
+                for step_name in ("manage_actions", "manage_remove"):
+                    flow = await self.managed_flow(config)
+                    step = getattr(flow, "async_step_" + step_name)
+                    record = runtime.records.pop(self.key)
+                    self.assertEqual((await step())["reason"], "invalid_selection")
+                    runtime.records[self.key] = record
+                    config_data = config.data
+                    self.hass.config_entries.async_update_entry(config, data={**config_data, "device_keys": []})
+                    self.assertEqual((await step())["reason"], "invalid_selection")
+                    self.hass.config_entries.async_update_entry(config, data=config_data)
+                    runtime.stopped = True
+                    self.assertEqual((await step())["reason"], "runtime_unavailable")
+                    runtime.stopped = False
+                    token = current_request.set(fixtures.Request(peer="127.0.0.1", owner="different-admin"))
+                    try:
+                        self.assertEqual((await step())["reason"], "local_admin_required")
+                    finally:
+                        current_request.reset(token)
+                flow = self.flow("reconfigure", config)
                 self.assertEqual(
-                    (await self.flow("reconfigure", config).async_step_manage())["reason"], "runtime_unavailable"
+                    (await flow.async_step_manage_remove({"confirm": True}))["reason"], "invalid_selection"
                 )
+                runtime.stopped = True
+                self.assertEqual((await flow.async_step_manage())["reason"], "runtime_unavailable")
+        finally:
+            await runtime.stop()
+
+    async def test_manage_preserves_blocked_resume_import_and_failure_paths(self):
+        config, runtime = await self.make_runtime()
+        try:
+            async with self.flow_environment():
+                flow = await self.managed_flow(config)
+                runtime.records[self.key]["phase"] = "blocked"
+                result = await flow.async_step_manage_resume({})
+                self.assertEqual(result["errors"], {"base": "safety_blocked"})
+                for enabled in (False, True):
+                    runtime.records[self.key]["phase"] = "needs_credentials"
+                    runtime.records[self.key]["target"]["recovery"] = enabled
+                    result = await flow.async_step_manage_resume({})
+                    self.assertEqual(result["step_id"], "credentials")
+                    self.assertEqual(flow._selected, [self.target["accessory_id"]])
+                    self.assertEqual(flow._recovery_ids, [self.target["accessory_id"]] if enabled else [])
+                runtime.records[self.key]["phase"] = "active"
+                with patch.object(runtime, "set_recovery", AsyncMock(return_value=False)):
+                    result = await flow.async_step_manage_recovery_on({})
+                    self.assertEqual(result["step_id"], "credentials")
+                    self.assertEqual(flow._recovery_ids, [self.target["accessory_id"]])
+                with patch.object(runtime, "remove_device", AsyncMock(side_effect=OSError())):
+                    result = await flow.async_step_manage_remove({"confirm": True})
+                    self.assertEqual(result["errors"], {"base": "device_action_failed"})
+                    self.assertEqual(result["step_id"], "manage_remove")
+                with patch.object(flow_module, "discover_devices", AsyncMock(side_effect=OSError())):
+                    runtime.records[self.key]["phase"] = "needs_credentials"
+                    result = await flow.async_step_manage_resume({})
+                    self.assertEqual(result["errors"], {"base": "device_action_failed"})
+        finally:
+            await runtime.stop()
+
+    async def test_real_flow_manager_routes_device_menu_and_confirmed_removal(self):
+        config, runtime = await self.make_runtime()
+        manager = self.hass.config_entries.flow
+        try:
+            with patch.object(runtime, "remove_device", AsyncMock()) as remove:
+                async with self.flow_environment():
+                    with patch(
+                        "homeassistant.config_entries._async_get_flow_handler",
+                        AsyncMock(return_value=flow_module.HomePodSensorLinkFlow),
+                    ):
+                        result = await manager.async_init(
+                            DOMAIN, context={"source": "reconfigure", "entry_id": config.entry_id}
+                        )
+                    flow_id = result["flow_id"]
+                    result = await manager.async_configure(flow_id, {"next_step_id": "manage"})
+                    self.assertEqual(result["step_id"], "manage")
+                    result = await manager.async_configure(flow_id, {"device": self.key})
+                    self.assertEqual(result["step_id"], "manage_actions")
+                    result = await manager.async_configure(flow_id, {"next_step_id": "manage"})
+                    self.assertEqual(result["step_id"], "manage")
+                    await manager.async_configure(flow_id, {"device": self.key})
+                    result = await manager.async_configure(flow_id, {"next_step_id": "manage_remove"})
+                    self.assertEqual(result["step_id"], "manage_remove")
+                    self.assertEqual(result["data_schema"]({}), {"confirm": False})
+                    result = await manager.async_configure(flow_id, {"confirm": False})
+                    self.assertEqual(result["errors"], {"base": "confirm_removal"})
+                    remove.assert_not_awaited()
+                    result = await manager.async_configure(flow_id, {"confirm": True})
+                    self.assertEqual(result["reason"], "device_updated")
+                    remove.assert_awaited_once_with(self.key)
         finally:
             await runtime.stop()
 

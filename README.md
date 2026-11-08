@@ -26,6 +26,7 @@
 ## Key features
 
 - **Climate sensors:** temperature and humidity from one or more selected HomePods.
+- **Friendly device names:** use uniquely matched AirPlay names during discovery and integration reloads. Manual names stay in place; unavailable or ambiguous matches keep the current name.
 - **Guided setup:** discover devices, import authorised controller credentials, or adopt existing native HomeKit sensors without changing their entities or history.
 - **Connection monitoring:** fresh authenticated checks, sensor freshness, diagnostics and administrator-access audits.
 - **Optional recovery:** on by default per device, with pinned identities, pairing-preservation checks and persisted repair limits.
@@ -56,9 +57,11 @@ Credential import requires a local HA administrator. HTTP import is accepted but
 
 - Credential import accepts selected HAP CSV rows, a single JSON credential record, `controllers`/`accessories` JSON bundles, and aiohomekit JSON dictionaries keyed by accessory ID. Dictionary records may include historical network fields. Literal address hints trigger directed DNS-SD discovery through temporary unicast reply sockets when multicast misses a HomePod; fresh advertisements supply current ports and imported keys supply identity pins. Use Reconfigure → Import pairing export to find missing devices, then review the newly discovered devices before setup.
 - Setup actively browses for sensor services for five seconds, then resolves their current endpoints. A HomePod that does not advertise its sensor service may remain absent even when its AirPlay player is visible.
+- If no HomePods are available to add, setup explains local discovery requirements and offers **Search again** or **Import pairing export**. Search again keeps your current import; Import pairing export lets you replace it with corrected address hints. HomePods already managed by this integration are hidden. A failed search is reported separately so you can check connectivity and retry.
 
 - New devices use a dedicated User controller; existing native HomeKit sensor entities and history remain unchanged.
 - Recovery is optional per device and requires verified administrator credentials. Network/discovery failures never authorise pairing changes.
+- Use **Reconfigure → Manage existing devices** to choose a HomePod, open its action menu and review an action before submitting it. The menu offers enable or disable recovery according to that HomePod’s current setting. Removal requires an explicit confirmation.
 - Removing a device deletes its owned credentials and recovery history. It does not revoke on-device pairings or delete native HomeKit entries/history.
 - No legacy `homepod_recovery` transition or storage migration is provided.
 

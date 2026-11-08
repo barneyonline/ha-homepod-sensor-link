@@ -26,12 +26,13 @@ from .ui import local_admin
 from .vault import get_vault
 
 
-def choices(options: dict[str, str], multiple: bool = False) -> selector.SelectSelector:
-    return selector.SelectSelector(
-        selector.SelectSelectorConfig(
-            options=[selector.SelectOptionDict(value=k, label=v) for k, v in options.items()], multiple=multiple
-        )
+def choices(options: dict[str, str], multiple: bool = False, *, dropdown: bool = False) -> selector.SelectSelector:
+    config = selector.SelectSelectorConfig(
+        options=[selector.SelectOptionDict(value=k, label=v) for k, v in options.items()], multiple=multiple
     )
+    if dropdown:
+        config["mode"] = selector.SelectSelectorMode.DROPDOWN
+    return selector.SelectSelector(config)
 
 
 class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -47,6 +48,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovery_hosts: list[str] = []
         self._selected: list[str] = []
         self._new_keys: list[str] = []
+        self._managed_device: str | None = None
 
     async def _access(self) -> User | None:
         user = local_admin(self.hass)
@@ -123,6 +125,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._discovered.pop(record["target"]["accessory_id"], None)
                 continue
             self._discovered.setdefault(record["target"]["accessory_id"], {"name": record.get("name", "HomePod")})
+        if not self._discovered:
+            return await self.async_step_discovery_failed() if errors else await self.async_step_no_devices()
         if user_input is not None:
             selected = user_input.get("devices", [])
             if selected and len(set(selected)) == len(selected) and set(selected) <= self._discovered.keys():
@@ -145,6 +149,16 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
         )
+
+    async def async_step_no_devices(self, user_input: Data | None = None) -> ConfigFlowResult:
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        return self.async_show_menu(step_id="no_devices", menu_options=["devices", "import_missing"])
+
+    async def async_step_discovery_failed(self, user_input: Data | None = None) -> ConfigFlowResult:
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        return self.async_show_menu(step_id="discovery_failed", menu_options=["devices", "import_missing"])
 
     async def async_step_policy(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
@@ -176,6 +190,18 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
         return self.async_show_menu(step_id="credentials", menu_options=["credential_export", "credential_manual"])
+
+    async def async_step_import_missing(self, user_input: Data | None = None) -> ConfigFlowResult:
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        if hasattr(self, "_task"):
+            return await self.async_step_verify()
+        # The empty-state action explicitly requests a fresh export. Search
+        # again keeps the staged import; verification must keep it immutable.
+        self._imported = None
+        self._discovery_hosts = []
+        self._selected = []
+        return await self.async_step_credential_export()
 
     async def async_step_credential_export(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
@@ -381,19 +407,89 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_manage(self, user_input: Data | None = None) -> ConfigFlowResult:
+        """Choose a device before offering any actions."""
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
         current = self._current()
         runtime = getattr(current, "runtime_data", None)
         if not runtime or runtime.stopped:
             return self.async_abort(reason="runtime_unavailable")
-        errors = {}
-        if user_input:
-            key, action = user_input["device"], user_input["action"]
-            if key not in cast(ConfigEntry, current).data["device_keys"]:
+        self._managed_device = None
+        keys = cast(ConfigEntry, current).data["device_keys"]
+        if user_input is not None:
+            key = user_input.get("device")
+            if key not in keys or key not in runtime.records:
                 return self.async_abort(reason="invalid_selection")
+            self._managed_device = key
+            return await self.async_step_manage_actions()
+        return self.async_show_form(
+            step_id="manage",
+            last_step=False,
+            data_schema=vol.Schema(
+                {
+                    vol.Required("device"): choices(
+                        {k: r["name"] for k, r in runtime.records.items() if k in keys}, dropdown=True
+                    ),
+                }
+            ),
+        )
+
+    async def async_step_manage_actions(self, user_input: Data | None = None) -> ConfigFlowResult:
+        """Offer actions for the selected device's current recovery policy."""
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        current = self._current()
+        runtime = getattr(current, "runtime_data", None)
+        if not runtime or runtime.stopped:
+            return self.async_abort(reason="runtime_unavailable")
+        key = self._managed_device
+        if key not in cast(ConfigEntry, current).data["device_keys"] or key not in runtime.records:
+            return self.async_abort(reason="invalid_selection")
+        record = runtime.records[key]
+        return self.async_show_menu(
+            step_id="manage_actions",
+            description_placeholders={"name": record["name"]},
+            menu_options=[
+                "manage_resume",
+                "manage_cancel",
+                "manage_recovery_off" if record["target"].get("recovery", True) else "manage_recovery_on",
+                "manage_remove",
+                "manage",
+            ],
+        )
+
+    async def async_step_manage_resume(self, user_input: Data | None = None) -> ConfigFlowResult:
+        return await self._confirm_manage_action("resume", user_input)
+
+    async def async_step_manage_cancel(self, user_input: Data | None = None) -> ConfigFlowResult:
+        return await self._confirm_manage_action("cancel", user_input)
+
+    async def async_step_manage_recovery_on(self, user_input: Data | None = None) -> ConfigFlowResult:
+        return await self._confirm_manage_action("recovery_on", user_input)
+
+    async def async_step_manage_recovery_off(self, user_input: Data | None = None) -> ConfigFlowResult:
+        return await self._confirm_manage_action("recovery_off", user_input)
+
+    async def async_step_manage_remove(self, user_input: Data | None = None) -> ConfigFlowResult:
+        return await self._confirm_manage_action("remove", user_input)
+
+    async def _confirm_manage_action(self, action: str, user_input: Data | None) -> ConfigFlowResult:
+        """Review an action before dispatching through the existing runtime safeguards."""
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        current = self._current()
+        runtime = getattr(current, "runtime_data", None)
+        if not runtime or runtime.stopped:
+            return self.async_abort(reason="runtime_unavailable")
+        key = self._managed_device
+        if key not in cast(ConfigEntry, current).data["device_keys"] or key not in runtime.records:
+            return self.async_abort(reason="invalid_selection")
+        record = runtime.records[key]
+        errors = {}
+        if user_input is not None and action == "remove" and not user_input.get("confirm"):
+            errors["base"] = "confirm_removal"
+        elif user_input is not None:
             try:
-                record = runtime.records[key]
                 needs_import = action == "resume" and record["phase"] == "needs_credentials"
                 if action == "resume" and record["phase"] == "blocked":
                     errors["base"] = "safety_blocked"
@@ -407,10 +503,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     await runtime.cancel_device(key)
                 elif action == "recovery_off":
                     await runtime.set_recovery(key, False)
-                elif action == "recovery_on":
-                    needs_import = not await runtime.set_recovery(key, True)
                 else:
-                    raise ValueError("invalid_device_action")
+                    needs_import = not await runtime.set_recovery(key, True)
                 if needs_import:
                     identifier = record["target"]["accessory_id"]
                     self._selected = [identifier]
@@ -425,21 +519,11 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:
                 errors["base"] = "device_action_failed"
         return self.async_show_form(
-            step_id="manage",
+            step_id=f"manage_{action}",
             errors=errors,
+            description_placeholders={"name": record["name"]},
             data_schema=vol.Schema(
-                {
-                    vol.Required("device"): choices({k: r["name"] for k, r in runtime.records.items()}),
-                    vol.Required("action"): choices(
-                        {
-                            "resume": "Resume setup",
-                            "cancel": "Cancel setup",
-                            "recovery_on": "Enable recovery",
-                            "recovery_off": "Disable recovery",
-                            "remove": "Remove device and local data",
-                        }
-                    ),
-                }
+                {vol.Required("confirm", default=False): selector.BooleanSelector()} if action == "remove" else {}
             ),
         )
 

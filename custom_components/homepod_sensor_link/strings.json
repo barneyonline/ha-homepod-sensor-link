@@ -8,7 +8,7 @@
       },
       "devices": {
         "title": "Select HomePods",
-        "description": "Discovery supplies candidates and network endpoints. Authentication verifies their pinned identities. Existing native entries are adopted without changing their entities.",
+        "description": "Select the HomePods you want to add. HomePods already managed by HomePod Sensor Link are hidden. Existing Home Assistant sensor entities and their history are preserved.",
         "data": {
           "devices": "HomePods"
         }
@@ -29,11 +29,10 @@
         }
       },
       "manage": {
-        "title": "Manage a HomePod",
-        "description": "Resume permits a pending pairing write after read-only checks. Cancel pauses all setup activity. Removal deletes this device’s local credentials and recovery history; it does not revoke accessory pairings or remove native entries.",
+        "title": "Choose a HomePod",
+        "description": "Select a HomePod to see its available actions.",
         "data": {
-          "device": "HomePod",
-          "action": "Action"
+          "device": "HomePod"
         }
       },
       "reconfigure": {
@@ -50,7 +49,7 @@
       },
       "credential_export": {
         "title": "Paste credential export",
-        "description": "Open your selected HAP CSV or JSON export in a text editor and paste its contents below. Only include the required HomeKit records (maximum 128 KiB). The text is visible while you edit it. Raw exports stay in memory and are not saved as uploaded files. Never post credentials in issues or chat. Address hints in pairing JSON trigger fresh discovery; review the discovered devices before continuing setup.",
+        "description": "Open your selected HAP CSV or JSON export in a text editor and paste its contents below. Only include the required HomeKit records (maximum 128 KiB). The text is visible while you edit it. Raw exports stay in memory and are not saved as uploaded files. Address hints in pairing JSON trigger fresh discovery; review the discovered devices before continuing setup.",
         "data": {
           "credential_export": "CSV or JSON export"
         }
@@ -64,6 +63,64 @@
           "accessory_id": "Accessory identifier",
           "accessory_public_key": "Pinned accessory public key"
         }
+      },
+      "no_devices": {
+        "title": "No HomePods found",
+        "description": "No HomePods are available to add. HomePods already managed by HomePod Sensor Link are hidden.\n\nMake sure your HomePods are powered on and Home Assistant can reach them on the local network. Their HomeKit sensor service must be discoverable; appearing as an AirPlay player is not enough.\n\nSearch again, or import a pairing export with local address hints to help find missing HomePods.",
+        "menu_options": {
+          "devices": "Search again",
+          "import_missing": "Import pairing export"
+        }
+      },
+      "discovery_failed": {
+        "title": "Could not search for HomePods",
+        "description": "The search could not complete. Check the local network connection and try again.\n\nMake sure your HomePods are powered on and Home Assistant can reach them on the local network. Their HomeKit sensor service must be discoverable; appearing as an AirPlay player is not enough.\n\nSearch again, or import a pairing export with local address hints to help find missing HomePods.",
+        "menu_options": {
+          "devices": "Search again",
+          "import_missing": "Import pairing export"
+        }
+      },
+      "manage_actions": {
+        "title": "Manage HomePod",
+        "description": "**{name}**\n\nChoose an action for this HomePod.",
+        "menu_options": {
+          "manage_resume": "Resume setup",
+          "manage_cancel": "Cancel setup",
+          "manage_recovery_on": "Enable automatic recovery",
+          "manage_recovery_off": "Disable automatic recovery",
+          "manage_remove": "Remove device and local data",
+          "manage": "Choose another HomePod"
+        },
+        "menu_option_descriptions": {
+          "manage_resume": "Run checks, then continue pending setup.",
+          "manage_cancel": "Pause setup for this HomePod.",
+          "manage_recovery_on": "Allow recovery if sensor access is lost.",
+          "manage_recovery_off": "Keep monitoring without automatic recovery.",
+          "manage_remove": "Review what will be removed before continuing."
+        }
+      },
+      "manage_resume": {
+        "title": "Resume setup?",
+        "description": "**{name}**\n\nResume may write a pending HomeKit pairing after identity and access checks pass."
+      },
+      "manage_cancel": {
+        "title": "Cancel setup?",
+        "description": "**{name}**\n\nPause all setup activity for this HomePod. You can resume it later."
+      },
+      "manage_recovery_on": {
+        "title": "Enable automatic recovery?",
+        "description": "**{name}**\n\nEnable automatic recovery if sensor access is lost. Verified administrator credentials are required; you may be asked to import them."
+      },
+      "manage_recovery_off": {
+        "title": "Disable automatic recovery?",
+        "description": "**{name}**\n\nStop automatic recovery for this HomePod. Sensor monitoring remains enabled."
+      },
+      "manage_remove": {
+        "title": "Remove this HomePod?",
+        "description": "**{name}**\n\nDelete this HomePod’s local credentials and recovery history. This does not revoke its HomeKit pairings or remove its native Home Assistant entries.",
+        "data": {
+          "confirm": "I understand that local credentials and recovery history will be deleted."
+        }
       }
     },
     "progress": {
@@ -74,7 +131,8 @@
       "select_devices": "Select one or more discovered or retained devices.",
       "safety_blocked": "Identity or permission validation blocked this device. Investigate the mismatch; Resume cannot replace its pinned identity.",
       "device_action_failed": "The device action did not complete. Local state was kept or cleanup remains pending. Check protected storage and connectivity before retrying.",
-      "invalid_credential_export": "The credentials could not be read. Check the CSV/JSON format, controller identifier and private key, and accessory identifier/public key. Include both accessory fields or leave both empty. Exports must be at most 128 KiB. Enter the credentials again to retry."
+      "invalid_credential_export": "The credentials could not be read. Check the CSV/JSON format, controller identifier and private key, and accessory identifier/public key. Include both accessory fields or leave both empty. Exports must be at most 128 KiB. Enter the credentials again to retry.",
+      "confirm_removal": "Confirm that you want to delete this HomePod’s local credentials and recovery history."
     },
     "abort": {
       "local_admin_required": "Use an authenticated Home Assistant administrator on the local network. Cloud and remote imports are not accepted.",
@@ -85,7 +143,7 @@
       "device_updated": "Device settings updated.",
       "reauth_not_required": "These monitoring-only devices do not need an administrator credential. Use Reconfigure to manage them.",
       "reauth_successful": "The existing pinned administrator credentials were verified.",
-      "reconfigure_successful": "The selected devices were updated without restarting healthy peers."
+      "reconfigure_successful": "The selected HomePods have been added to HomePod Sensor Link."
     }
   },
   "services": {

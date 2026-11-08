@@ -3,6 +3,13 @@
 ## Unreleased
 
 - Add a guided macOS Terminal wizard and bundled Swift helper for user-authorised HomeKit extraction, with private progress across reboots, saved restoration instructions, and selected JSON preparation after security settings are restored. The helper compiles against Apple frameworks without the unavailable CodeSignKit/FoundationKit/LoggerKit packages. Signing/export require confirmation; security changes and restarts remain manual. Hardware verification is still outstanding.
+- Choose a HomePod before opening its native action menu, with descriptions, a recovery action matching its current setting and a review step before changes. Require explicit confirmation before deleting local credentials and recovery history.
+
+- Clarify the confirmation shown after adding HomePods to an existing setup.
+- Replace the empty HomePod selector with a clear message, local discovery guidance and options to search again or import a pairing export. Show a separate message when discovery fails.
+- Allow a corrected pairing export after an empty or failed search without restarting setup; searching again keeps the existing import.
+- Use a HomePod's AirPlay name during discovery and refresh existing device names when the integration loads. Require a unique match to freshly discovered sensor addresses; keep the current name when discovery fails or matching is ambiguous, and preserve Home Assistant device and entity name overrides.
+- Confirm proposed names with fresh HAP and AirPlay DNS replies before saving them, preventing stale zeroconf cache addresses from assigning another HomePod's name after an address reassignment.
 
 ## 0.1.3 — 2026-11-08
 
