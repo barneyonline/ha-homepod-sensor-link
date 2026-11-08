@@ -39,7 +39,7 @@
 1. Read the [credential prerequisite and extraction guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction). A controller key needs its controller ID and accessory public-key pin; a HomeKit setup code is insufficient.
 2. On **HA 2026.11+**, use the button above, or open **Settings → Marketplace → Add from link** and enter `https://github.com/barneyonline/ha-homepod-sensor-link`. Connect GitHub when prompted and add it as an **Integration**.
 3. Open **HomePod Sensor Link**, select **Install**, review the [latest release](https://github.com/barneyonline/ha-homepod-sensor-link/releases/latest), and confirm. Follow any restart prompt. Choose a tagged release; `main`/default-branch versions are development builds.
-4. Continue the setup prompt, or open **Settings → Devices & services → Add integration → HomePod Sensor Link**. Select your devices and recovery policy, then follow the local credential-import link.
+4. Continue the setup prompt, or open **Settings → Devices & services → Add integration → HomePod Sensor Link**. Select your devices and recovery policy, then choose **Paste a CSV or JSON export** or **Enter controller credentials** in the standard Home Assistant setup dialog. Open an export in a text editor to copy its contents; file upload is not required.
 
 See the [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) for detailed installation steps and [HA’s Marketplace instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories) for adding custom repositories.
 <!-- ha-marketplace:exclude-end -->

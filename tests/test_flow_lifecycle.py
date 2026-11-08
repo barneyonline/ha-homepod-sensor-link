@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from contextlib import asynccontextmanager
+import json
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -10,7 +11,8 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.homepod_sensor_link import config_flow as flow_module
 from custom_components.homepod_sensor_link.credentials import DOMAIN
-from custom_components.homepod_sensor_link.ui import KEY
+from custom_components.homepod_sensor_link.importer import MAX_IMPORT
+from custom_components.homepod_sensor_link.ui import current_request
 import test_onboarding_v2 as fixtures
 from test_boundary_failures import native_config
 from test_recovery import fixture
@@ -29,8 +31,127 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
         flow.context = {"source": source, **({"entry_id": entry.entry_id} if entry else {})}
         return flow
 
+    async def test_native_credential_menu_and_empty_forms(self):
+        from homeassistant.helpers.selector import TextSelectorType
+
+        async with self.flow_environment():
+            flow = self.flow()
+            result = await flow.async_step_credentials()
+            self.assertEqual(result["type"], FlowResultType.MENU)
+            self.assertEqual(result["menu_options"], ["credential_export", "credential_manual"])
+            export = await flow.async_step_credential_export()
+            schema = export["data_schema"].schema
+            self.assertTrue(next(iter(schema.values())).config["multiline"])
+            manual = await flow.async_step_credential_manual()
+            fields = manual["data_schema"].schema
+            self.assertEqual(fields["controller_private_key"].config["type"], TextSelectorType.PASSWORD)
+            self.assertEqual(fields["controller_private_key"].config["autocomplete"], "off")
+            self.assertIsNone(export.get("description_placeholders"))
+            self.assertIsNone(manual.get("description_placeholders"))
+
+    async def test_native_export_rejects_invalid_and_utf8_oversize_without_echo_then_retries(self):
+        async with self.flow_environment():
+            flow = self.flow()
+            for content in (
+                "invalid " + self.source["iOSDeviceLTSK"],
+                "x" * (MAX_IMPORT + 1),
+                "é" * MAX_IMPORT,
+                "\ud800",
+            ):
+                result = await flow.async_step_credential_export({"credential_export": content})
+                self.assertEqual(result["errors"], {"base": "invalid_credential_export"})
+                self.assertIsNone(flow._imported)
+                self.assertNotIn(self.source["iOSDeviceLTSK"], str(result))
+                self.assertNotIn("default", str(result["data_schema"].schema))
+            with patch.object(flow, "_begin", AsyncMock(return_value={"type": "test"})) as begin:
+                await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+            begin.assert_awaited_once()
+            self.assertEqual(flow._imported["controllers"], [self.source])
+            flow._committed = True
+            flow.async_remove()
+            self.assertIsNone(flow._imported)
+
+    async def test_native_csv_export_is_parsed(self):
+        csv = "Account,Password,App / Group\n"
+        csv += f"{self.source['iOSPairingId']},{self.source['iOSDeviceLTPK']}{self.source['iOSDeviceLTSK']},com.apple.hap.pairing\n"
+        csv += f"{self.target['accessory_id']},{self.target['accessory_key']},com.apple.hap.pairing\n"
+        async with self.flow_environment():
+            flow = self.flow()
+            with patch.object(flow, "_begin", AsyncMock(return_value={"type": "test"})):
+                await flow.async_step_credential_export({"credential_export": csv})
+            self.assertEqual(flow._imported["controllers"], [self.source])
+            self.assertEqual(flow._imported["accessories"], {self.target["accessory_id"]: self.target["accessory_key"]})
+
+    async def test_native_manual_validates_pairs_and_does_not_echo_secrets(self):
+        valid = {"controller_id": self.source["iOSPairingId"], "controller_private_key": self.source["iOSDeviceLTSK"]}
+        async with self.flow_environment():
+            flow = self.flow()
+            for invalid in (
+                {},
+                {**valid, "accessory_id": "missing-pin"},
+                {**valid, "accessory_public_key": "ab" * 32},
+                {**valid, "controller_private_key": "not-a-key"},
+            ):
+                result = await flow.async_step_credential_manual(invalid)
+                self.assertEqual(result["errors"], {"base": "invalid_credential_export"})
+                self.assertIsNone(flow._imported)
+                self.assertNotIn(self.source["iOSDeviceLTSK"], str(result))
+                self.assertNotIn("default", str(result["data_schema"].schema))
+            for value, accessories in (
+                (valid, {}),
+                (
+                    {
+                        **valid,
+                        "accessory_id": self.target["accessory_id"],
+                        "accessory_public_key": self.target["accessory_key"],
+                    },
+                    {self.target["accessory_id"]: self.target["accessory_key"]},
+                ),
+            ):
+                with patch.object(flow, "_begin", AsyncMock(return_value={"type": "test"})) as begin:
+                    await flow.async_step_credential_manual(value)
+                begin.assert_awaited_once()
+                self.assertEqual(flow._imported["controllers"], [self.source])
+                self.assertEqual(flow._imported["accessories"], accessories)
+
+    async def test_native_forms_require_local_authenticated_admin_and_original_owner(self):
+        async with self.flow_environment():
+            flow = self.flow()
+            await flow.async_step_credentials()
+            for request, cloud in (
+                (fixtures.Request(peer="198.51.100.1"), False),
+                (fixtures.Request(peer="127.0.0.1", admin=False), False),
+                (fixtures.Request(peer="127.0.0.1", authenticated=False), False),
+                (fixtures.Request(peer="127.0.0.1", owner="different-admin"), False),
+                (fixtures.Request(peer="127.0.0.1"), True),
+                ({}, False),
+            ):
+                token = current_request.set(request)
+                try:
+                    with (
+                        patch("custom_components.homepod_sensor_link.ui.is_cloud_connection", return_value=cloud),
+                        patch.object(flow_module, "parse_export") as parse,
+                    ):
+                        for step in (flow.async_step_credential_export, flow.async_step_credential_manual):
+                            result = await step({"credential_export": json.dumps(self.export)})
+                            self.assertEqual(result["reason"], "local_admin_required")
+                        parse.assert_not_called()
+                finally:
+                    current_request.reset(token)
+            self.assertEqual(flow._owner, "owner")
+
     async def test_every_sensitive_step_requires_local_administrator(self):
-        for name in ("user", "devices", "policy", "credentials", "finish", "manage", "reconfigure"):
+        for name in (
+            "user",
+            "devices",
+            "policy",
+            "credentials",
+            "credential_export",
+            "credential_manual",
+            "finish",
+            "manage",
+            "reconfigure",
+        ):
             with self.subTest(step=name):
                 result = await getattr(self.flow(), "async_step_" + name)()
                 self.assertEqual(result["reason"], "local_admin_required")
@@ -57,7 +178,9 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 (await flow.async_step_policy({"recovery_devices": ["unselected"]}))["reason"], "invalid_selection"
             )
-            self.assertEqual((await flow.async_step_credentials({}))["errors"], {"base": "import_required"})
+            self.assertEqual(
+                (await flow.async_step_credential_export({}))["errors"], {"base": "invalid_credential_export"}
+            )
 
     async def test_all_discovered_devices_start_selected_and_can_be_deselected(self):
         found = {f"disposable-{index}": {"name": f"HomePod {index}"} for index in range(4)}
@@ -154,7 +277,6 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
             flow._task.set_result([])
             self.assertEqual((await flow.async_step_finish())["reason"], "verification_failed")
             self.assertEqual((await flow.async_step_verify())["reason"], "verification_failed")
-            self.hass.data.pop(KEY)
             flow._committed = True
             flow.async_remove()
 

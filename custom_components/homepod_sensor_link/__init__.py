@@ -18,7 +18,6 @@ from .repairs import create_issue
 from .models import Data
 from .credentials import DOMAIN, public_targets
 from .engine import SafetyFailure
-from .ui import KEY, setup_ui
 from .vault import get_vault, Vault, VaultStates
 from .coordinator import (
     Runtime as Runtime,
@@ -35,8 +34,6 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: Data) -> bool:
-    await setup_ui(hass)
-
     def runtime() -> Runtime:
         entry = hass.config_entries.async_get_entry(hass.data.get(OWNER, ""))
         active = getattr(entry, "runtime_data", None)
@@ -137,9 +134,6 @@ async def async_remove_entry(hass: HomeAssistant, entry: HomePodConfigEntry) -> 
     # Abort outstanding flows before purge; Vault drains cancelled atomic I/O.
     for flow in list(hass.config_entries.flow.async_progress_by_handler(DOMAIN)):
         hass.config_entries.flow.async_abort(flow["flow_id"])
-    imports = hass.data.get(KEY)
-    if imports:
-        imports.pending.clear()
     vault = hass.data.get(DOMAIN + ".vault") or Vault(hass)
     await vault.purge()
     await Store(hass, 1, DOMAIN + ".state", private=True, atomic_writes=True).async_remove()

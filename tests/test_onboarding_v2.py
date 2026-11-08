@@ -33,7 +33,7 @@ from custom_components.homepod_sensor_link.engine import AuthenticationFailure, 
 from custom_components.homepod_sensor_link.importer import parse_export, MAX_IMPORT
 from custom_components.homepod_sensor_link.provisioning import make_owned, Provisioner, prepare, boot_id
 from custom_components.homepod_sensor_link.sensor import Measurement, RecoveryStatus
-from custom_components.homepod_sensor_link.ui import Imports, ImportView, KEY, current_request
+from custom_components.homepod_sensor_link.ui import current_request
 from custom_components.homepod_sensor_link.vault import get_vault, DATA_FILE
 from test_recovery import fixture, keypair
 
@@ -109,17 +109,9 @@ class ImportParserTests(unittest.TestCase):
 
 
 class Request(dict):
-    def __init__(self, body=b"", *, peer="192.0.2.1", admin=True, owner="owner", nonce=""):
-        super().__init__(hass_user=SimpleNamespace(id=owner, is_admin=admin), ha_authenticated=True)
+    def __init__(self, *, peer="192.0.2.1", admin=True, owner="owner", authenticated=True):
+        super().__init__(hass_user=SimpleNamespace(id=owner, is_admin=admin), ha_authenticated=authenticated)
         self.remote = peer
-        self.headers = {"X-HomePod-Import": nonce}
-        self.read = False
-
-        async def chunks(_size):
-            self.read = True
-            yield body
-
-        self.content = SimpleNamespace(iter_chunked=chunks)
 
 
 class OnboardingTests(unittest.IsolatedAsyncioTestCase):
@@ -159,51 +151,9 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.now = [0]
         self.provisioner = Provisioner(self.vault, self.backend, lambda: self.now[0], boot_id(self.hass))
-        self.hass.data[KEY] = Imports()
 
     async def asyncTearDown(self):
         await self.hass.async_stop(force=True)
-
-    async def test_import_gate_checks_before_body_read_and_binds_user(self):
-        imports = self.hass.data[KEY]
-        nonce = imports.grant("flow", "owner")
-        view = ImportView(self.hass, imports)
-        for peer, admin, owner in (
-            ("198.51.100.1", True, "owner"),
-            ("127.0.0.1", False, "owner"),
-            ("127.0.0.1", True, "other"),
-        ):
-            request = Request(json.dumps(self.export).encode(), peer=peer, admin=admin, owner=owner, nonce=nonce)
-            response = await view.post(request, "flow")
-            self.assertEqual(response.status, 403)
-            self.assertFalse(request.read)
-        request = Request(json.dumps(self.export).encode(), peer="127.0.0.1", nonce=nonce)
-        response = await view.post(request, "flow")
-        self.assertEqual(response.status, 200)
-        self.assertNotIn(self.source["iOSDeviceLTSK"], response.text)
-        self.assertIsNone(imports.consume("flow", "other"))
-        self.assertEqual(imports.consume("flow", "owner")["controllers"], [self.source])
-        self.assertIsNone(imports.consume("flow", "owner"))
-
-    async def test_cloud_oversize_expiry_and_duplicate_upload_refused(self):
-        imports = self.hass.data[KEY]
-        nonce = imports.grant("flow", "owner")
-        view = ImportView(self.hass, imports)
-        request = Request(b"x", peer="127.0.0.1", nonce=nonce)
-        with patch("custom_components.homepod_sensor_link.ui.is_cloud_connection", return_value=True):
-            self.assertEqual((await view.post(request, "flow")).status, 403)
-        self.assertFalse(request.read)
-        self.assertEqual(
-            (await view.post(Request(b"x" * (MAX_IMPORT + 1), peer="127.0.0.1", nonce=nonce), "flow")).status, 400
-        )
-        self.assertEqual(
-            (await view.post(Request(json.dumps(self.export).encode(), peer="127.0.0.1", nonce=nonce), "flow")).status,
-            200,
-        )
-        self.assertEqual((await view.post(Request(b"", peer="127.0.0.1", nonce=nonce), "flow")).status, 409)
-        imports.pending["flow"]["expires"] = 0
-        self.assertIsNone(imports.consume("flow", "owner"))
-        self.assertEqual(imports.pending, {})
 
     async def test_initial_write_is_persisted_first_and_has_user_permission(self):
         await self.vault.put(self.key, self.record)
@@ -419,7 +369,6 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
                 setattr(backend, method, AsyncMock())
         try:
             with (
-                patch("custom_components.homepod_sensor_link.config_flow.setup_ui", AsyncMock()),
                 patch(
                     "custom_components.homepod_sensor_link.config_flow.discover_devices", AsyncMock(return_value=found)
                 ),
@@ -447,10 +396,10 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(policy["step_id"], "policy")
             self.assertEqual(policy["data_schema"]({})["recovery_devices"], [self.target["accessory_id"]])
             credentials = await flow.async_step_policy({"recovery_devices": [self.target["accessory_id"]]})
-            self.assertIn("#flow=flow&nonce=", credentials["description_placeholders"]["import_url"])
-            imports = self.hass.data[KEY]
-            imports.pending["flow"]["data"] = parse_export(json.dumps(self.export))
-            result = await self.finish_flow(flow, await flow.async_step_credentials({}))
+            self.assertEqual(credentials["type"], FlowResultType.MENU)
+            result = await self.finish_flow(
+                flow, await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+            )
             self.assertEqual(result["type"], FlowResultType.CREATE_ENTRY)
             output = json.dumps(result["data"])
             self.assertNotIn(self.source["iOSDeviceLTSK"], output)
@@ -459,7 +408,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.vault.records()[key]["target"]["ha_permissions"], 0)
             self.assertEqual(self.vault.records()[key]["phase"], "prepared")
             backend.restore_missing.assert_not_called()
-            self.assertEqual(imports.pending, {})
+            self.assertIsNone(flow._imported)
 
     async def test_partial_matching_failure_keeps_ready_device_and_pending_result(self):
         flow = HomePodSensorLinkFlow()
@@ -478,6 +427,92 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         records = self.vault.records()
         self.assertEqual({r["phase"] for r in records.values()}, {"prepared", "needs_credentials"})
         self.assertEqual(len({r["target"]["entry_id"] for r in records.values()}), 2)
+
+    async def concurrent_credential_submissions(self, step, user_input):
+        from custom_components.homepod_sensor_link import config_flow
+
+        probe_started, release_probe = asyncio.Event(), asyncio.Event()
+        submissions_waiting = asyncio.Event()
+
+        async def inspect(_target):
+            probe_started.set()
+            await release_probe.wait()
+            return {"recovery_admin_verified": True}
+
+        waiting = 0
+
+        async def blocked_access(hass):
+            nonlocal waiting
+            waiting += 1
+            if waiting == 2:
+                submissions_waiting.set()
+            return await get_vault(hass)
+
+        backend = SimpleNamespace(
+            inspect_recovery=AsyncMock(side_effect=inspect),
+            read_ha=AsyncMock(return_value={"temperature": 22, "humidity": 45}),
+        )
+        manager = self.hass.config_entries.flow
+        async with self.flow_environment(backend):
+            with patch(
+                "homeassistant.config_entries._async_get_flow_handler", AsyncMock(return_value=HomePodSensorLinkFlow)
+            ):
+                result = await manager.async_init(DOMAIN, context={"source": "user"})
+            flow_id = result["flow_id"]
+            await manager.async_configure(flow_id, {"devices": [self.target["accessory_id"]]})
+            await manager.async_configure(flow_id, {"recovery_devices": [self.target["accessory_id"]]})
+            await manager.async_configure(flow_id, {"next_step_id": step})
+            flow = manager._progress[flow_id]
+            preparation_tasks = []
+            prepare_flow = flow._prepare
+
+            async def tracked_prepare():
+                preparation_tasks.append(asyncio.current_task())
+                return await prepare_flow()
+
+            results = []
+            try:
+                with (
+                    patch.object(config_flow, "get_vault", side_effect=blocked_access),
+                    patch.object(config_flow, "parse_export", wraps=parse_export) as parse,
+                    patch.object(flow, "_prepare", side_effect=tracked_prepare),
+                ):
+                    async with self.vault.lock:
+                        submissions = [
+                            asyncio.create_task(manager.async_configure(flow_id, user_input)) for _ in range(2)
+                        ]
+                        await asyncio.wait_for(submissions_waiting.wait(), 1)
+                    results = await asyncio.gather(*submissions)
+                    await asyncio.wait_for(probe_started.wait(), 1)
+            finally:
+                release_probe.set()
+                await asyncio.gather(*preparation_tasks)
+            self.assertEqual([result["type"] for result in results], [FlowResultType.SHOW_PROGRESS] * 2)
+            self.assertEqual(len(preparation_tasks), 1)
+            self.assertIs(flow._task, preparation_tasks[0])
+            self.assertEqual(parse.call_count, 1)
+            backend.inspect_recovery.assert_awaited_once()
+            records = self.vault.records()
+            self.assertEqual(len(records), 1)
+            self.assertEqual(set(flow._task.result()), set(records))
+            record = next(iter(records.values()))
+            self.assertEqual(record["source_pin"]["iOSPairingId"], self.source["iOSPairingId"])
+
+    async def test_concurrent_native_export_submissions_share_one_preparation_task(self):
+        await self.concurrent_credential_submissions(
+            "credential_export", {"credential_export": json.dumps(self.export)}
+        )
+
+    async def test_concurrent_native_manual_submissions_share_one_preparation_task(self):
+        await self.concurrent_credential_submissions(
+            "credential_manual",
+            {
+                "controller_id": self.source["iOSPairingId"],
+                "controller_private_key": self.source["iOSDeviceLTSK"],
+                "accessory_id": self.target["accessory_id"],
+                "accessory_public_key": self.target["accessory_key"],
+            },
+        )
 
     async def test_real_flow_manager_cancellation_closes_resources_and_discards_import(self):
         entered, closed = asyncio.Event(), asyncio.Event()
@@ -507,13 +542,12 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
                 flow_id = result["flow_id"]
                 await manager.async_configure(flow_id, {"devices": [self.target["accessory_id"]]})
                 await manager.async_configure(flow_id, {"recovery_devices": [self.target["accessory_id"]]})
-                self.hass.data[KEY].pending[flow_id]["data"] = parse_export(json.dumps(self.export))
-                result = await manager.async_configure(flow_id, {})
+                await manager.async_configure(flow_id, {"next_step_id": "credential_export"})
+                result = await manager.async_configure(flow_id, {"credential_export": json.dumps(self.export)})
                 self.assertEqual(result["type"], FlowResultType.SHOW_PROGRESS)
                 await entered.wait()
                 manager.async_abort(flow_id)
                 await asyncio.wait_for(closed.wait(), 1)
-        self.assertEqual(self.hass.data[KEY].pending, {})
         self.assertEqual(manager.async_progress(), [])
         self.assertEqual(self.vault.records(), {})
 

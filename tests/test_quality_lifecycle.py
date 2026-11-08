@@ -12,9 +12,7 @@ from custom_components.homepod_sensor_link import sensor
 from custom_components.homepod_sensor_link.config_flow import HomePodSensorLinkFlow
 from custom_components.homepod_sensor_link.credentials import DOMAIN, public_targets
 from custom_components.homepod_sensor_link.engine import DeviceState
-from custom_components.homepod_sensor_link.importer import parse_export
 from custom_components.homepod_sensor_link.provisioning import make_owned
-from custom_components.homepod_sensor_link.ui import KEY
 import test_onboarding_v2 as fixtures
 from test_recovery import fixture
 
@@ -123,8 +121,9 @@ class QualityLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await flow.async_step_reauth_confirm())["reason"], "local_admin_required")
             async with self.flow_environment() as backend:
                 self.assertEqual((await flow.async_step_reauth_confirm({}))["step_id"], "credentials")
-                self.hass.data[KEY].pending["flow"]["data"] = parse_export(json.dumps(self.export))
-                result = await self.finish_flow(flow, await flow.async_step_credentials({}))
+                result = await self.finish_flow(
+                    flow, await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+                )
                 self.assertEqual(result["reason"], "reauth_successful")
                 backend.restore_missing.assert_not_called()
             record = self.vault.records()[self.key]
