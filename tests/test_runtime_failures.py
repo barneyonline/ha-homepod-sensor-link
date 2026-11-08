@@ -141,6 +141,15 @@ class RuntimeFailureTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(runtime.stopped)
             await self.hass.async_stop(force=True)
             self.assertTrue(runtime.closed)
+            # A startup callback already queued before unload cannot restart
+            # the watchdog or polling after the runtime has been stopped.
+            with (
+                patch.object(runtime.watchdog, "start") as start_watchdog,
+                patch.object(runtime.coordinator, "async_refresh", AsyncMock()) as refresh,
+            ):
+                await started[0](self.hass)
+                start_watchdog.assert_not_called()
+                refresh.assert_not_awaited()
             with patch.object(self.hass.config_entries, "async_unload_platforms", AsyncMock(return_value=True)):
                 await integration.async_unload_entry(self.hass, config)
             self.assertNotIn(integration.OWNER, self.hass.data)

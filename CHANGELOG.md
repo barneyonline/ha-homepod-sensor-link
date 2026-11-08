@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Build heartbeat monitoring into the integration and remove the optional automation blueprint from the repository and installation package. An independent five-minute timer alerts through Repairs and a persistent notification after 15 minutes without a completed device check, clears alerts when checks resume and respects startup grace, pauses and removal. Existing imported blueprint automations can be deleted manually.
+
 - Choose a HomePod before opening its native action menu, with descriptions, a recovery action matching its current setting and a review step before changes. Require explicit confirmation before deleting local credentials and recovery history.
 
 - Clarify the confirmation shown after adding HomePods to an existing setup.
