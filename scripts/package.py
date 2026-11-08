@@ -40,7 +40,6 @@ def build(output):
             "LICENSE",
             "hacs.json",
             "quality_scale.yaml",
-            "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml",
         )
     )
     files.extend(sorted((ROOT / "docs/images").glob("*.svg")))

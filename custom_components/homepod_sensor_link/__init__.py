@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import cast
 from aiohomekit.characteristic_cache import CharacteristicCacheMemory
 from aiohomekit.controller.ip import IpController
-from homeassistant.components import zeroconf
+from homeassistant.components import persistent_notification, zeroconf
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, Event, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError, HomeAssistantError
@@ -110,6 +110,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomePodConfigEntry) -> b
         raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key="setup_failed") from None
 
     async def started(_hass: HomeAssistant) -> None:
+        if runtime.stopped:
+            return
+        runtime.watchdog.start()
         await runtime.coordinator.async_refresh()
 
     async def stop(_event: Event) -> None:
@@ -141,6 +144,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: HomePodConfigEntry) -> 
     await Store(hass, 1, DOMAIN + ".state", private=True, atomic_writes=True).async_remove()
     ir.async_delete_issue(hass, DOMAIN, "checks_unavailable")
     ir.async_delete_issue(hass, DOMAIN, "engine_conflict")
+    ir.async_delete_issue(hass, DOMAIN, "monitoring_stalled")
+    persistent_notification.async_dismiss(hass, DOMAIN + "_watchdog_" + entry.entry_id)
     for key in entry.data.get("device_keys", []):
         clear_device_issues(hass, key)
     if runtime:

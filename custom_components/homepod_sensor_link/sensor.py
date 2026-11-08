@@ -135,6 +135,7 @@ class RecoveryStatus(DeviceSensor):
             "onboarding": record.get("phase"),
             "onboarding_error": record.get("error"),
             "last_checked": _timestamp(data.get("last_checked")),
+            "last_completed": _timestamp(data.get("last_completed")),
             "last_verified": _timestamp(data.get("last_verified")),
             "last_repair": _timestamp(data.get("last_repair")),
             "successful_repairs": data.get("repairs", 0),

@@ -201,28 +201,10 @@ class RepositoryContractTests(unittest.TestCase):
                 self.assertEqual(warning["type"], "markdown")
                 self.assertRegex(warning["attributes"]["value"].lower(), r"(never|do not).*(keys|credentials)")
 
-    def test_watchdog_requires_selected_diagnostics_without_household_ids(self):
-        text = (ROOT / "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml").read_text()
-        blueprint = yaml.load(text, Loader=yaml.BaseLoader)
-        self.assertEqual(blueprint["blueprint"]["domain"], "automation")
-        self.assertIn("monitored_entities", blueprint["blueprint"]["input"])
-        self.assertIn("last_checked", text)
-        self.assertIn("900", text)
-        self.assertNotRegex(text, r"sensor\.[a-z_]+")
-        self.assertNotIn("legacy", text.lower())
-        self.assertNotIn("homepod_sensor_link.check_now", text)
-        self.assertEqual(blueprint["mode"], "single")
-
     def test_deliberate_runtime_inventory_matches_hacs(self):
         config = json.loads((ROOT / "devtools/validation.json").read_text())
         self.assertEqual(config["home_assistant"], ["2026.11.0"])
         self.assertEqual(set(config["coverage"]), set(config["home_assistant"]))
-        blueprint = yaml.safe_load(
-            (ROOT / "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml")
-            .read_text()
-            .replace("!input monitored_entities", "[]")
-        )
-        self.assertEqual(blueprint["blueprint"]["homeassistant"]["min_version"], config["home_assistant"][0])
         self.assertEqual(config["aiohomekit"], "4.0.1")
         for version in config["home_assistant"]:
             self.assertTrue(re.fullmatch(r"\d{4}\.\d+\.\d+", version))
