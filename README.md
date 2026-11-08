@@ -5,7 +5,8 @@
 </picture>
 
 <p align="center">
-  <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations"><img src="https://img.shields.io/badge/development-experimental-orange" alt="Experimental development"></a>
+  <a href="https://github.com/barneyonline/ha-homepod-sensor-link/releases/latest"><img src="https://img.shields.io/github/v/release/barneyonline/ha-homepod-sensor-link" alt="Latest release"></a>
+  <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations"><img src="https://img.shields.io/badge/status-experimental-orange" alt="Experimental release"></a>
   <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"><img src="https://img.shields.io/badge/Home_Assistant-2026.11%2B-41BDF5?logo=homeassistant&amp;logoColor=white" alt="Home Assistant 2026.11 or newer"></a>
   <a href="#get-started"><img src="https://img.shields.io/badge/install-HA_Marketplace-41BDF5" alt="Install through Home Assistant Marketplace"></a>
 </p>
@@ -20,7 +21,7 @@
 </p>
 
 > [!IMPORTANT]
-> HomePod Sensor Link is an independent community project with no affiliation to Apple. **Experimental:** controller-key extraction, device setup and pairing recovery still require real-device verification. Review the [known limitations](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations) before installing. No supported release or HACS listing is claimed.
+> HomePod Sensor Link is an independent community project with no affiliation to Apple. **Experimental:** controller-key extraction, device setup and pairing recovery still require real-device verification. Review the [known limitations](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations) before installing. No HACS listing is claimed.
 
 ## Key features
 
@@ -37,7 +38,7 @@
 
 1. Read the [credential prerequisite and extraction guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction). A controller key needs its controller ID and accessory public-key pin; a HomeKit setup code is insufficient.
 2. On **HA 2026.11+**, use the button above, or open **Settings → Marketplace → Add from link** and enter `https://github.com/barneyonline/ha-homepod-sensor-link`. Connect GitHub when prompted and add it as an **Integration**.
-3. Open **HomePod Sensor Link**, select **Install**, review the version, and confirm. Follow any restart prompt. There is no published release yet: a `main`/default-branch version is a development build.
+3. Open **HomePod Sensor Link**, select **Install**, review the [latest release](https://github.com/barneyonline/ha-homepod-sensor-link/releases/latest), and confirm. Follow any restart prompt. Choose a tagged release; `main`/default-branch versions are development builds.
 4. Continue the setup prompt, or open **Settings → Devices & services → Add integration → HomePod Sensor Link**. Select your devices and recovery policy, then follow the local credential-import link.
 
 See the [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) for detailed installation steps and [HA’s Marketplace instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories) for adding custom repositories.

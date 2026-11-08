@@ -17,7 +17,7 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/barneyonline/ha-homepod-sensor-link/issues",
   "single_config_entry": true,
-  "version": "2.0.0",
+  "version": "0.1.0",
   "zeroconf": [
     {
       "type": "_hap._tcp.local.",
