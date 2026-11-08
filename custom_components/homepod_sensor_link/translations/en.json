@@ -50,7 +50,7 @@
       },
       "credential_export": {
         "title": "Paste credential export",
-        "description": "Open your selected HAP CSV or JSON export in a text editor and paste its contents below. Only include the required HomeKit records (maximum 128 KiB). The text is visible while you edit it. Raw exports stay in memory and are not saved as uploaded files. Never post credentials in issues or chat. Address hints in pairing JSON trigger fresh discovery; review the discovered devices before continuing setup.",
+        "description": "Open your selected HAP CSV or JSON export in a text editor and paste its contents below. Only include the required HomeKit records (maximum 128 KiB). The text is visible while you edit it. Raw exports stay in memory and are not saved as uploaded files. Address hints in pairing JSON trigger fresh discovery; review the discovered devices before continuing setup.",
         "data": {
           "credential_export": "CSV or JSON export"
         }
