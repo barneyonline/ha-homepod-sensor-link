@@ -28,13 +28,28 @@ class WizardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             directory = wizard.private_directory(root / "private")
-            source = directory / "build.synthetic" / "KeychainKit"
-            binary = source / ".build/debug/KeychainTool"
+            source = directory / "build.synthetic" / "HomeKitExport"
+            binary = source / "homekit-export"
             binary.parent.mkdir(parents=True)
             binary.write_text("synthetic fixture, never executed")
             binary.chmod(0o700)
+            wizard.private_write(
+                source,
+                "HomeKitExport.entitlements",
+                plistlib.dumps({"keychain-access-groups": ["com.apple.hap.pairing"]}),
+            )
             wizard.private_write(directory, "tool-source.txt", str(source).encode())
             self.assertEqual(wizard.tool_source(directory), source)
+            wizard.private_write(
+                source, "HomeKitExport.entitlements", plistlib.dumps({"keychain-access-groups": ["*"]})
+            )
+            with self.assertRaises(wizard.WizardError):
+                wizard.tool_source(directory)
+            wizard.private_write(
+                source,
+                "HomeKitExport.entitlements",
+                plistlib.dumps({"keychain-access-groups": ["com.apple.hap.pairing"]}),
+            )
             binary.chmod(0o600)
             with self.assertRaises(wizard.WizardError):
                 wizard.tool_source(directory)

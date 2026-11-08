@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add a guided macOS Terminal wizard for user-authorised KeychainKit extraction, with private progress across reboots, saved restoration instructions, and selected JSON preparation after security settings are restored. Security changes and restarts remain manual; hardware verification is still outstanding.
+- Add a guided macOS Terminal wizard and bundled Swift helper for user-authorised HomeKit extraction, with private progress across reboots, saved restoration instructions, and selected JSON preparation after security settings are restored. The helper compiles against Apple frameworks without the unavailable CodeSignKit/FoundationKit/LoggerKit packages. Signing/export require confirmation; security changes and restarts remain manual. Hardware verification is still outstanding.
 
 ## 0.1.3 — 2026-11-08
 

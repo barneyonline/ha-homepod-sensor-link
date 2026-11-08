@@ -204,11 +204,10 @@ run_wizard() {
   TOTAL_STAGES=5
   local hsl_mode="${1:-}" hsl_python hsl_helper hsl_script hsl_phase hsl_build hsl_developer hsl_certificate hsl_source
   local hsl_directory="$HOME/HomePodSensorLink-Export"
-  local hsl_revision="a2e668c2b7ec5fbaeea431dc47e7e0b6c73da605"
   if [[ "$hsl_mode" == --help ]]; then
     printf '%s\n' 'Usage: bash scripts/macos_homekit_wizard.sh [--restore | --help]' \
       'Run in Terminal on an Apple silicon Mac; rerun the same command after each reboot.' \
-      'The script builds KeychainKit and exports keys only after confirmation.' \
+      'The script builds the bundled Swift helper without downloading packages; signing and export require confirmation.' \
       'Security changes and restarts are manual. --restore prints the saved restoration steps.' \
       'Private files stay in ~/HomePodSensorLink-Export. Never share this folder.'
     return
@@ -264,11 +263,12 @@ run_wizard() {
     say 'This experimental route temporarily requires SIP and AMFI to be disabled by you.'
     say 'Use the manual wiki guide for managed Macs or custom security policies.'
     open_url 'https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction'
-    step 'Install full Xcode, open it to finish setup, then Settings → Accounts → Manage Certificates → + → Apple Development.'
-    confirm 'Ready to download and build the pinned third-party tool, with normal protections enabled?' || exit 1
+    step 'Install Xcode or its Command Line Tools. A valid Apple Development signing certificate is also required.'
+    step 'To create a certificate in Xcode: Settings → Accounts → Manage Certificates → + → Apple Development.'
+    confirm 'Ready to compile the bundled helper locally, with normal protections enabled?' || exit 1
     hsl_developer="${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}"
-    if [[ ! -d "$hsl_developer/../MacOS" ]]; then
-      warn 'Full Xcode must be selected. Follow the wiki to configure Xcode, then rerun.'
+    if [[ ! -d "$hsl_developer" ]]; then
+      warn 'Select the installed Xcode or Command Line Tools, then rerun.'
       exit 1
     fi
     if [[ -e "$hsl_directory/tool-source.txt" || -L "$hsl_directory/tool-source.txt" ]]; then
@@ -280,17 +280,13 @@ run_wizard() {
       exit 1
     fi
     hsl_build=$(mktemp -d "$hsl_directory/build.XXXXXX")
-    say 'Downloading and building. Build output stays in the private build folder.'
-    if ! (
-      git clone --no-checkout https://github.com/pseudorandomuser/KeychainKit.git "$hsl_build/KeychainKit" &&
-      git -C "$hsl_build/KeychainKit" checkout --detach "$hsl_revision" &&
-      /usr/bin/sed -i '' 's|git@github.com:pvieito/|https://github.com/pvieito/|g' "$hsl_build/KeychainKit/Package.swift" &&
-      DEVELOPER_DIR="$hsl_developer" /usr/bin/xcrun swift build --package-path "$hsl_build/KeychainKit"
-    ) > "$hsl_build/build.txt" 2>&1; then
-      warn 'Build failed. Keep protections enabled. Check the private build.txt for unavailable dependencies or compile errors.'
+    say 'Building from this checkout with Apple frameworks. Build output stays in the private build folder.'
+    if ! DEVELOPER_DIR="$hsl_developer" sh "$(dirname "$hsl_script")/build_macos_homekit.sh" \
+      "$hsl_build/HomeKitExport" > "$hsl_build/build.txt" 2>&1; then
+      warn 'Build failed. Keep protections enabled. Check the private build.txt for compiler or SDK errors.'
       exit 1
     fi
-    (set -o noclobber; printf '%s\n' "$hsl_build/KeychainKit" > "$hsl_directory/tool-source.txt")
+    (set -o noclobber; printf '%s\n' "$hsl_build/HomeKitExport" > "$hsl_directory/tool-source.txt")
   else
     say 'The prepared tool and original-settings snapshot are retained from your earlier run.'
   fi
@@ -331,14 +327,15 @@ run_wizard() {
     step 'In Keychain Access, copy the complete name of your valid Apple Development certificate.'
     ask hsl_certificate 'Certificate name (not a key):'
     [[ -n "$hsl_certificate" ]] || exit 1
-    confirm 'Run KeychainTool for com.apple.hap.pairing and save its secret output privately?' || exit 1
+    confirm 'Sign the bundled helper with this certificate, then export com.apple.hap.pairing privately?' || exit 1
     # Record restoration as the next task before invoking the third-party tool.
     "$hsl_python" "$hsl_helper" extracted "$hsl_directory"
     if ! (
       set -o noclobber
-      cd "$hsl_source"
-      CODESIGNKIT_DEFAULT_IDENTITY="$hsl_certificate" .build/debug/KeychainTool \
-        --verbose -g com.apple.hap.pairing > "$hsl_directory/homekit-keys.txt" 2>&1
+      /usr/bin/codesign --force --sign "$hsl_certificate" --entitlements "$hsl_source/HomeKitExport.entitlements" \
+        "$hsl_source/homekit-export" > "$hsl_source/signing.txt" 2>&1 &&
+      /usr/bin/codesign --verify --strict "$hsl_source/homekit-export" >> "$hsl_source/signing.txt" 2>&1 &&
+      "$hsl_source/homekit-export" --export-hap > "$hsl_directory/homekit-keys.txt" 2>&1
     ); then
       warn 'Extraction did not complete. Restore protections now, then inspect the private dump locally.'
       exit 1

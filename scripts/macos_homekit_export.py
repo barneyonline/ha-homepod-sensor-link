@@ -67,11 +67,11 @@ def private_write(directory, name, content):
 
 def tool_source(directory):
     source = Path(private_read(directory / "tool-source.txt", 4096).decode().strip())
-    binary = source / ".build/debug/KeychainTool"
+    binary = source / "homekit-export"
     if (
         not source.is_absolute()
         or source.resolve() != source
-        or source.name != "KeychainKit"
+        or source.name != "HomeKitExport"
         or source.parent.parent != directory
         or not source.parent.name.startswith("build.")
         or source not in binary.resolve().parents
@@ -80,6 +80,14 @@ def tool_source(directory):
         or not os.access(binary, os.X_OK)
     ):
         raise WizardError("Prepared tool path is invalid; restore protections and use the manual guide.")
+    try:
+        entitlements = plistlib.loads(private_read(source / "HomeKitExport.entitlements"))
+    except (ValueError, plistlib.InvalidFileException):
+        raise WizardError(
+            "Prepared helper entitlements are invalid; restore protections before troubleshooting."
+        ) from None
+    if entitlements != {"keychain-access-groups": ["com.apple.hap.pairing"]}:
+        raise WizardError("Helper entitlements differ from the restricted HomeKit access group.")
     return source
 
 
