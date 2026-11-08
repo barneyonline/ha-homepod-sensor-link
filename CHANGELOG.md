@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Give the discovery card a readable “HomePod sensors” title and explain temperature, humidity and optional automatic recovery during setup.
+
 ## 0.1.2 — 2026-11-08
 
 - Find HomePods missed by multicast browsing using bounded, directed HAP DNS-SD queries to literal address hints in an imported pairing dictionary. Exported ports remain unused; authentication still verifies pinned identities.
