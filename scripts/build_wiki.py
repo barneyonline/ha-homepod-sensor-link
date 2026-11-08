@@ -1,4 +1,4 @@
-"""Generate a local, portable wiki from the canonical Markdown sources."""
+"""Validate Wiki sources or export pages outside the repository for publication."""
 
 import argparse
 from html import escape
@@ -57,9 +57,9 @@ def banners(root):
     return result
 
 
-def banner_header(page, *, github):
+def banner_header(page):
     # GitHub clamps width but retains an explicit height, so let height stay intrinsic.
-    base = WIKI_IMAGES_URL if github else "../docs/images/wiki"
+    base = WIKI_IMAGES_URL
     alt = escape(f"HomePod Sensor Link — {page.replace('-', ' ')}", quote=True)
     return (
         "<picture>\n"
@@ -70,10 +70,9 @@ def banner_header(page, *, github):
     )
 
 
-def pages(root=ROOT, *, github=False):
+def pages(root=ROOT):
     assets = banners(root)
     mapped = {(root / source).resolve(): page for page, source in PAGES.items()}
-    mapped.update({(root / "wiki" / (page + ".md")).resolve(): page for page in PAGES})
     repository = {(root / source).resolve(): source for source in REPOSITORY_DOCS}
     output = {}
     for page, source in PAGES.items():
@@ -85,34 +84,40 @@ def pages(root=ROOT, *, github=False):
             if not parsed.scheme and parsed.path:
                 linked = (location.parent / unquote(parsed.path)).resolve()
                 if linked in mapped:
-                    target = WIKI_URL + "/" + mapped[linked] if github else mapped[linked] + ".md"
+                    target = WIKI_URL + "/" + mapped[linked]
                 elif linked in repository:
                     source_path = repository[linked]
-                    target = f"{REPOSITORY_URL}/blob/main/{source_path}" if github else "../" + source_path
+                    target = f"{REPOSITORY_URL}/blob/main/{source_path}"
                 else:
                     raise ValueError(f"Unmapped wiki link in {source}")
                 if parsed.fragment:
                     target += "#" + parsed.fragment
             return match["start"] + target + match["end"]
 
-        banner = banner_header(page, github=github) if assets else ""
+        banner = banner_header(page) if assets else ""
         output[page + ".md"] = HEADER + banner + LINK.sub(rewrite, location.read_text())
     sidebar = []
     for page in PAGES:
-        target = WIKI_URL + "/" + page if github else page + ".md"
+        target = WIKI_URL + "/" + page
         sidebar.append(f"- [{page.replace('-', ' ')}]({target})")
     output["_Sidebar.md"] = HEADER + "# Navigation\n\n" + "\n".join(sidebar) + "\n"
     return output
 
 
-def build(root=ROOT, *, check=False, github=False, output=None):
-    if github and output is None:
+def build(root=ROOT, *, check=False, github=True, output=None):
+    # Keep --github accepted for existing publication commands; all exports use native links.
+    if output is None and not check:
         raise ValueError("GitHub export requires a separate output directory")
-    directory = root / "wiki" if output is None else Path(output).resolve()
-    if output is not None and (directory == root.resolve() or root.resolve() in directory.parents):
+    if (root / "wiki").exists():
+        raise ValueError("Wiki snapshots belong in the separate GitHub Wiki repository")
+    directory = Path(output).resolve() if output is not None else None
+    if directory is not None and (directory == root.resolve() or root.resolve() in directory.parents):
         raise ValueError("Keep exports outside the source tree")
-    generated = pages(root, github=github)
-    assets = banners(root) if github else {}
+    generated = pages(root)
+    assets = banners(root)
+    if directory is None:
+        print(f"Wiki sources checked: {len(generated)} pages; no files written or remote access.")
+        return
     existing = {p.name for p in directory.glob("*.md")}
     if existing - generated.keys():
         raise ValueError("Unexpected wiki pages; reconcile explicitly rather than deleting work")
@@ -128,7 +133,7 @@ def build(root=ROOT, *, check=False, github=False, output=None):
             if not (directory / "images" / name).is_file() or (directory / "images" / name).read_bytes() != content
         )
         if stale:
-            raise ValueError("Wiki is stale; run python3 scripts/build_wiki.py")
+            raise ValueError("Wiki export is stale; regenerate the separate output directory")
     else:
         directory.mkdir(exist_ok=True)
         for name, value in generated.items():
@@ -138,8 +143,7 @@ def build(root=ROOT, *, check=False, github=False, output=None):
             images.mkdir(exist_ok=True)
             for name, content in assets.items():
                 (images / name).write_bytes(content)
-    label = "GitHub wiki export" if github else "Local wiki"
-    print(f"{label} {'checked' if check else 'generated'}: {len(generated)} pages; no remote access.")
+    print(f"GitHub wiki export {'checked' if check else 'generated'}: {len(generated)} pages; no remote access.")
 
 
 if __name__ == "__main__":

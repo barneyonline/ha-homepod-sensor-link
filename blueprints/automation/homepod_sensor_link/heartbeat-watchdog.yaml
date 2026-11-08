@@ -2,6 +2,9 @@ blueprint:
   name: HomePod Sensor Link heartbeat
   description: Alert after selected HomePod Sensor Link diagnostic sensors stop completing checks for 15 minutes. Temperature value changes are not heartbeats.
   domain: automation
+  source_url: https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml
+  homeassistant:
+    min_version: "2026.10.0"
   input:
     monitored_entities:
       name: Sensor access diagnostic entities

@@ -6,6 +6,35 @@ Apple sensor hardware support covers HomePod mini and HomePod (2nd generation), 
 
 Obtain controller credentials explicitly using an authorised process. Read [EXTRACTION.md](EXTRACTION.md): the graphical encrypted-backup route is a source-researched candidate, not a proven modern HomeKit export workflow. Do not disable OS protections or export a whole keychain into HA. No setup code/QR is treated as an existing administrator identity.
 
+## Installation
+
+The integration requires **Home Assistant 2026.10.0+**. Built-in Marketplace is available from **2026.11**; use HACS or manual installation on 2026.10. This repository is not listed in the shared catalog and has no published release yet. A `main`/default-branch version is a development build.
+
+### Home Assistant Marketplace — HA 2026.11+
+
+[![Open HomePod Sensor Link in Home Assistant Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=barneyonline&repository=ha-homepod-sensor-link&category=integration)
+
+1. Select the button above. Alternatively, open **Settings → Marketplace → Add from link**, enter `https://github.com/barneyonline/ha-homepod-sensor-link`, then select **Add**.
+2. Connect GitHub if prompted. If Marketplace asks for the repository type, choose **Integration** and select **Add** again.
+3. Open **HomePod Sensor Link** and select **Install**. Review the offered version, then confirm. If only the default branch is offered, it installs development code.
+4. Follow any restart prompt. Continue the integration setup prompt, or open **Settings → Devices & services → Add integration → HomePod Sensor Link**.
+5. Follow **Guided flow** below to select devices and import credentials. Installing files does not authenticate a HomePod or complete sensor setup.
+
+Adding the repository from this button does not submit it to the public catalog. See [HA’s custom-repository instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories) and [official repository-link guidance](https://contributors.home-assistant.io/marketplace/guides/catalog/#the-link-to-your-repository).
+
+### HACS — HA 2026.10
+
+1. With HACS installed, [open HomePod Sensor Link in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=barneyonline&repository=ha-homepod-sensor-link&category=integration). Add the custom repository as **Integration** when prompted.
+2. Open the repository, download the offered version and restart Home Assistant.
+3. Open **Settings → Devices & services → Add integration → HomePod Sensor Link**, then follow **Guided flow** below.
+
+The older HACS repository link opens Marketplace on HA 2026.11+. Do not install a second copy alongside the Marketplace version.
+
+### Manual development installation
+
+1. Download the repository source and copy only `custom_components/homepod_sensor_link` into `<config>/custom_components/`, producing `<config>/custom_components/homepod_sensor_link/manifest.json`.
+2. Restart Home Assistant, add **HomePod Sensor Link** under **Settings → Devices & services**, then follow **Guided flow** below.
+
 ## Guided flow
 
 1. Add **HomePod Sensor Link** in HA. Candidate HAP services and existing native entries are discovered and matched by accessory ID. Discovery never supplies or replaces an accessory public-key pin.
@@ -46,7 +75,7 @@ Recovery is on by default but cannot act without a verified, separately trusted 
 
 New controllers have User permission; adopted native controllers retain their pinned permission. Recovery restores exactly the pinned HA row and permission. Identity/key/permission mismatches fail closed.
 
-For new entities, values become unavailable when their verified sample is stale or setup is not ready; native adoption also requires recent numeric reports. Recovery success requires actual reports after reload/publication. An unchanged temperature still has a heartbeat; the optional `monitoring/heartbeat-watchdog.yaml` blueprint lets you select diagnostic entities.
+For new entities, values become unavailable when their verified sample is stale or setup is not ready; native adoption also requires recent numeric reports. Recovery success requires actual reports after reload/publication. An unchanged temperature still has a heartbeat; the optional `blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml` blueprint lets you select diagnostic entities.
 
 The imported administrator identity is retained while setup is incomplete or recovery is enabled. After completed monitoring-only setup it is removed from the private record; the dedicated HA private key remains for reads. Enabling recovery again requires re-import and verification against the retained public administrator pin.
 

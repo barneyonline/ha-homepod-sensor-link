@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.build_wiki import BANNER_DIR, PAGES, WIKI_IMAGES_URL, banners, build
+from scripts.build_wiki import BANNER_DIR, PAGES, WIKI_IMAGES_URL, banners, build, pages
 from scripts.check_coverage import check
 from scripts.check_repository import check_links
 from scripts.run_tests import ROOT, run
@@ -76,8 +76,8 @@ class DocumentationGateTests(unittest.TestCase):
                 patch("scripts.build_wiki.PAGES", {"Home": "source.md"}),
                 patch("scripts.build_wiki.REPOSITORY_DOCS", {"guides/evidence.md"}),
             ):
-                build(root)
-                self.assertIn("(../guides/evidence.md#results)", (root / "wiki/Home.md").read_text())
+                build(root, check=True)
+                self.assertFalse((root / "wiki").exists())
                 build(root, github=True, output=exported)
                 self.assertIn(
                     "https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/guides/evidence.md#results",
@@ -87,15 +87,16 @@ class DocumentationGateTests(unittest.TestCase):
                 self.assertNotIn("Evidence", (exported / "_Sidebar.md").read_text())
                 source.write_text("[Unknown](not-approved.md)\n")
                 with self.assertRaisesRegex(ValueError, "Unmapped wiki link"):
-                    build(root)
+                    build(root, check=True)
 
     def test_every_repository_page_has_a_complete_theme_pair(self):
         assets = banners(ROOT)
         self.assertEqual(set(assets), {f"{page}-{theme}.jpg" for page in PAGES for theme in ("dark", "light")})
+        generated = pages()
         for page in PAGES:
-            snapshot = (ROOT / "wiki" / f"{page}.md").read_text()
-            self.assertIn(f"../docs/images/wiki/{page}-dark.jpg", snapshot)
-            self.assertIn(f'src="../docs/images/wiki/{page}-light.jpg"', snapshot)
+            self.assertIn(f"{WIKI_IMAGES_URL}/{page}-dark.jpg", generated[f"{page}.md"])
+            self.assertIn(f'src="{WIKI_IMAGES_URL}/{page}-light.jpg"', generated[f"{page}.md"])
+        self.assertFalse((ROOT / "wiki").exists())
 
     def test_theme_headers_and_asset_bytes_survive_export_and_detect_drift(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -107,14 +108,13 @@ class DocumentationGateTests(unittest.TestCase):
             for theme in ("dark", "light"):
                 (assets / f"Home-{theme}.jpg").write_bytes(b"disposable-banner-" + theme.encode())
             with patch("scripts.build_wiki.PAGES", {"Home": "source.md"}):
-                build(root)
+                build(root, check=True)
                 build(root, github=True, output=exported)
                 build(root, github=True, output=exported, check=True)
-                local = (root / "wiki/Home.md").read_text()
                 published = (exported / "Home.md").read_text()
                 self.assertIn('media="(prefers-color-scheme: dark)"', published)
                 self.assertIn(f'src="{WIKI_IMAGES_URL}/Home-light.jpg"', published)
-                self.assertIn("../docs/images/wiki/Home-dark.jpg", local)
+                self.assertFalse((root / "wiki").exists())
                 self.assertEqual(source.read_text(), "# Start\n")
                 for theme in ("dark", "light"):
                     self.assertEqual(
@@ -135,13 +135,13 @@ class DocumentationGateTests(unittest.TestCase):
             dark.write_bytes(b"disposable-banner")
             with patch("scripts.build_wiki.PAGES", {"Home": "source.md"}):
                 with self.assertRaisesRegex(ValueError, "Missing wiki banner"):
-                    build(root)
+                    build(root, check=True)
                 (assets / "Home-light.jpg").symlink_to(dark)
                 with self.assertRaisesRegex(ValueError, "symlink"):
-                    build(root)
+                    build(root, check=True)
             self.assertFalse((root / "wiki").exists())
 
-    def test_github_export_preserves_anchors_external_links_and_local_snapshot(self):
+    def test_github_export_preserves_anchors_external_links_and_source_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root, exported = (Path(directory) / name for name in ("source", "export"))
             root.mkdir()
@@ -150,8 +150,7 @@ class DocumentationGateTests(unittest.TestCase):
             )
             (root / "other.md").write_text("# Other\n")
             with patch("scripts.build_wiki.PAGES", {"Home": "source.md", "Other": "other.md"}):
-                build(root)
-                local = (root / "wiki/Home.md").read_text()
+                build(root, check=True)
                 build(root, github=True, output=exported)
                 build(root, github=True, output=exported, check=True)
                 published = (exported / "Home.md").read_text()
@@ -160,7 +159,8 @@ class DocumentationGateTests(unittest.TestCase):
                 self.assertIn("[External](https://example.invalid/guide)", published)
                 self.assertNotIn("Home.md#start", published)
                 self.assertIn("/wiki/Other)", (exported / "_Sidebar.md").read_text())
-                self.assertEqual((root / "wiki/Home.md").read_text(), local)
+                self.assertFalse((root / "wiki").exists())
+                self.assertTrue((root / "source.md").read_text().startswith("# Start"))
 
     def test_published_export_cannot_replace_source_or_unexpected_pages(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -187,24 +187,28 @@ class DocumentationGateTests(unittest.TestCase):
             source.write_text("[Missing](missing.md) [Escape](../outside.md)")
             self.assertEqual(len(check_links(root)), 2)
 
-    def test_wiki_drift_is_detected_and_unexpected_work_is_not_deleted(self):
+    def test_export_drift_is_detected_without_recreating_repository_snapshots(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root, exported = (Path(directory) / name for name in ("source", "export"))
+            root.mkdir()
             source = root / "source.md"
             source.write_text("# Start\n\n[Self](source.md#start)\n")
             with patch("scripts.build_wiki.PAGES", {"Home": "source.md"}):
-                build(root)
-                build(root, check=True)
-                page = root / "wiki/Home.md"
-                self.assertIn("(Home.md#start)", page.read_text())
+                build(root, output=exported)
+                build(root, output=exported, check=True)
+                self.assertIn("/wiki/Home#start)", (exported / "Home.md").read_text())
                 source.write_text("# Changed\n")
                 with self.assertRaises(ValueError):
-                    build(root, check=True)
-                extra = root / "wiki/Unrelated.md"
+                    build(root, output=exported, check=True)
+                extra = exported / "Unrelated.md"
                 extra.write_text("Preserve this work")
                 with self.assertRaises(ValueError):
-                    build(root)
+                    build(root, output=exported)
                 self.assertEqual(extra.read_text(), "Preserve this work")
+                self.assertFalse((root / "wiki").exists())
+                (root / "wiki").mkdir()
+                with self.assertRaisesRegex(ValueError, "separate GitHub Wiki"):
+                    build(root, check=True)
 
 
 class TestRunnerSafetyTests(unittest.TestCase):

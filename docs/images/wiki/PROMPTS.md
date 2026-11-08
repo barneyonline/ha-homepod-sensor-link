@@ -6,4 +6,4 @@ Generated with the built-in OpenAI image generation tool using the corresponding
 
 Generation masters use the template's 2172 × 724 canvas. Publication files are opaque 1800 × 600 JPEGs exported with macOS `sips`, quality 86, preserving the 3:1 composition. This keeps the complete theme set suitable for documentation downloads. Only publication JPEGs are included in manual-install archives.
 
-`scripts/build_wiki.py` adds accessible theme-aware picture headers to portable snapshots and copies the exact publication bytes into a separate GitHub Wiki export. Regeneration does not call an image service or access the network. Add a matching pair when adding a page, then rebuild the snapshots. Keep the canonical page heading and text available independently of its banner.
+`scripts/build_wiki.py` adds accessible theme-aware picture headers and copies the exact publication bytes into a separate GitHub Wiki export outside the source tree. Exporting does not call an image service or access the network. Add a matching pair when adding a page, then rebuild the export. Keep the canonical page heading and text available independently of its banner.

@@ -5,13 +5,13 @@ Reviewed the other local integrations on 7 November 2026, then compared all 14 p
 | Reference pattern | HomePod Sensor Link implementation |
 |---|---|
 | Short feature/setup README with documentation navigation | README links to the published GitHub Wiki |
-| Wiki Home, sidebar, setup, operation, troubleshooting and development pages | Published Wiki with versioned sources, portable snapshots and a separate native-link export; no implicit remote sync |
+| Wiki Home, sidebar, setup, operation, troubleshooting and development pages | Published Wiki with versioned sources and a separate native-link export; no generated page copies in the source repository or implicit remote sync |
 | Pinned Docker validation and explicit compatibility | Existing two HA versions retained; central tooling inventory; offline tests and read-only source mounts |
 | Statement and branch coverage evidence | Exact 100% statements/branches per Python module, full credential-panel Node coverage and JSON/XML evidence |
 | Consistent formatting and lint | Pinned Ruff correctness rules and formatter; shared editor settings |
 | Translation/service and metadata checks | Repository contract tests verify English parity, actions, version/domain and packaging |
 | Community contribution/support templates | Sanitised issue forms, pull-request checklist and changelog |
-| Dependency and CI maintenance | Weekly Action proposals; scheduled/manual read-only checks, SHA-pinned external actions, actionlint and bounded jobs |
+| Dependency and CI maintenance | Weekly Action proposals; development Python requirements configured with routine version PRs disabled and security updates separately controlled; scheduled/manual read-only checks, SHA-pinned external actions, actionlint and bounded jobs |
 | Issue and PR maintenance | Trusted-main assignment, exact form-label reconciliation and privacy-focused evidence guidance; manual runs preview only |
 | Release engineering | Scanned development artifacts, checksums, clean-source provenance and independent downloaded-archive verification; no tag/release/deployment publishing |
 | Quality-scale evidence | All 54 rules with source/test/docs evidence, scoped exemptions and strict external readiness modes; no awarded-tier claim |

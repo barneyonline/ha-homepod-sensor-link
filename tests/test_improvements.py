@@ -2,12 +2,16 @@
 
 import copy
 from datetime import timedelta
+import logging
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import yaml
+from homeassistant.components.blueprint import BLUEPRINT_SCHEMA, DomainBlueprints
+from homeassistant.components.blueprint.importer import fetch_blueprint_from_url
 from homeassistant.helpers.template import Template
 from homeassistant.core import HomeAssistant, State
 from homeassistant.util import dt as dt_util
@@ -177,7 +181,7 @@ class WatchdogTemplateTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.hass = HomeAssistant("/tmp/homepod-monitor-template-tests")
         self.config = yaml.safe_load(
-            (Path(__file__).parent.parent / "monitoring/heartbeat-watchdog.yaml")
+            (Path(__file__).parent.parent / "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml")
             .read_text()
             .replace("!input monitored_entities", "[]")
         )
@@ -191,6 +195,42 @@ class WatchdogTemplateTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.hass.async_stop(force=True)
+
+    async def test_native_blueprint_loader_and_selected_input_substitution(self):
+        relative = "homepod_sensor_link/heartbeat-watchdog.yaml"
+        source = Path(__file__).parent.parent / "blueprints/automation" / relative
+        with tempfile.TemporaryDirectory() as directory:
+            self.hass.config.config_dir = directory
+            target = Path(directory) / "blueprints/automation" / relative
+            target.parent.mkdir(parents=True)
+            target.write_bytes(source.read_bytes())
+            blueprints = DomainBlueprints(
+                self.hass, "automation", logging.getLogger(__name__), lambda *_: False, AsyncMock(), BLUEPRINT_SCHEMA
+            )
+            blueprint = await blueprints.async_get_blueprint(relative)
+            self.assertIsNone(blueprint.validate())
+            inputs = await blueprints.async_inputs_from_config(
+                {"use_blueprint": {"path": relative, "input": {"monitored_entities": self.entities[:1]}}}
+            )
+            self.assertEqual(inputs.async_substitute()["variables"]["monitored_entities"], self.entities[:1])
+
+    async def test_native_github_import_preserves_suggested_filename_and_new_source_url(self):
+        source = Path(__file__).parent.parent / "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml"
+        url = (
+            "https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/"
+            "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml"
+        )
+        response = SimpleNamespace(text=AsyncMock(return_value=source.read_text()))
+        session = SimpleNamespace(get=AsyncMock(return_value=response))
+        with patch(
+            "homeassistant.components.blueprint.importer.aiohttp_client.async_get_clientsession", return_value=session
+        ):
+            imported = await fetch_blueprint_from_url(self.hass, url)
+        self.assertEqual(imported.suggested_filename, "barneyonline/heartbeat-watchdog")
+        self.assertEqual(imported.blueprint.metadata["source_url"], url)
+        session.get.assert_awaited_once_with(
+            url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/"), raise_for_status=True
+        )
 
     def set_age(self, entity, minutes):
         self.hass.states.async_set(

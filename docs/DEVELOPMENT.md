@@ -46,16 +46,16 @@ The Git audit fails when actual metadata is missing. Publication preserves the e
 
 ## Documentation and automation
 
-Edit canonical source pages, regenerate `wiki/` with `python3 scripts/build_wiki.py`, then validate. Local links, English/action/entity/issue translations, metadata and generated-page drift are checked.
+Edit canonical source pages and validate them with `python3 scripts/build_wiki.py --check`. This renders and checks the Wiki sources and banner inventory without writing files. Local links, English/action/entity/issue translations and metadata are also checked.
 
-The published GitHub Wiki contains the selected user and developer guides; their source pages and portable `wiki/` snapshots remain versioned here. Contributing, release notes, research, dependencies and quality/validation evidence stay in the repository. Links to those documents resolve to repository files in GitHub exports and portable relative paths in local snapshots. They are not duplicated as Wiki pages. Prepare a separate export with GitHub Wiki page URLs rather than local `.md` links:
+The published GitHub Wiki contains the selected user and developer guides. Their canonical source pages and artwork remain versioned here; generated pages belong only in the separate Wiki repository. Contributing, release notes, research, dependencies and quality/validation evidence stay in the repository and exports link to those files. Prepare a separate export outside the source tree:
 
 ```sh
 python3 scripts/build_wiki.py --github --output /tmp/homepod-link-wiki-export
 python3 scripts/build_wiki.py --github --output /tmp/homepod-link-wiki-export --check
 ```
 
-Every Wiki page has light/dark artwork in `docs/images/wiki/`, based on the approved README template. The generator adds a theme-aware `<picture>` header with a light fallback and descriptive alternative text. Local snapshots use portable relative image paths; GitHub exports use raw Wiki image URLs and copy all publication JPEGs into `images/`. The complete theme set and exact exported bytes are checked for drift. Artwork prompts and the page catalogue live beside the assets; manual archives include only the publication JPEGs.
+Every Wiki page has light/dark artwork in `docs/images/wiki/`, based on the approved README template. The generator adds a theme-aware `<picture>` header with a light fallback and descriptive alternative text. Exports use raw Wiki image URLs and copy all publication JPEGs into `images/`. Checking an export verifies its pages and asset bytes against current sources. Artwork prompts and the page catalogue live beside the assets; manual archives include only the publication JPEGs.
 
 This command has no network access and does not publish. To publish an authorised update, clone `https://github.com/barneyonline/ha-homepod-sensor-link.wiki.git`, compare and copy only the generated pages and `images/` assets into that checkout, audit its working files/index/history with the public-content checker, and commit/push its existing default branch. Preserve unrelated Wiki content and existing history. Never delete canonical source pages or grant CI write permissions to perform this manual step.
 

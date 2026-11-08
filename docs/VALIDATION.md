@@ -5,8 +5,8 @@ Date: 8 November 2026 (Australia/Melbourne). HomePod Sensor Link, domain `homepo
 | Check | Observed result |
 |---|---|
 | Supplied baseline before development | 62 tests passed on HA 2026.11.0 |
-| Current HA 2026.10.0 matrix | 202 tests passed |
-| Current HA 2026.11.0 matrix | 202 tests passed |
+| Current HA 2026.10.0 matrix | 204 tests passed |
+| Current HA 2026.11.0 matrix | 204 tests passed |
 | Host content/Git scanner/package tests | 13 tests passed |
 | Host repository tooling tests | 16 tests passed |
 | Development-artifact integrity | 5 host tests: exact clean source, checksum, scope, unsafe ZIP entries and foreign-component rejection |
@@ -22,12 +22,12 @@ Date: 8 November 2026 (Australia/Melbourne). HomePod Sensor Link, domain `homepo
 | Codecov reporting | [Run 42425887513](https://github.com/barneyonline/ha-homepod-sensor-link/actions/runs/42425887513) passed validation and the isolated upload job on `a76f130`; public badge reports 100%, with successful project/patch checks |
 | Strict Platinum/release readiness | Intentionally refused while external requirements remain unverified |
 | Repository contracts | Naming/version/matrix/action/translation parity, enum labels/icons, source suppression checks, local links, read-only CI/artifacts, isolated trusted-main metadata jobs and Codecov reporting |
-| Local wiki | 12 generated pages including sidebar match canonical sources; all 11 Wiki pages have complete light/dark banner pairs and export drift checks |
-| Published GitHub Wiki | 11 documentation pages and custom sidebar; native page links/anchors, preserved source snapshots and existing Wiki history |
+| Wiki sources and exports | 12 pages including sidebar render from canonical sources without creating a local Wiki folder; all 11 Wiki pages have complete light/dark banner pairs and external export drift checks |
+| Published GitHub Wiki | 11 documentation pages and custom sidebar; native page links/anchors, versioned canonical sources and existing Wiki history |
 | Working-file public-content audit | Passed, including hidden source files |
 | Strict actual Git audit | Existing GitHub history preserved; current files/index/reachable commits scanned before upload; earlier `2d5e069` remains unverified |
 | Synthetic browser preview | Earlier local mock-receiver check rejected empty input, accepted disposable fields, cleared inputs and removed nonce; no installed-HA/device proof |
-| Manual package | One component, frontend/banner assets, docs/wiki/licence/blueprint and quality evidence; exact bytes scanned, deterministic ZIP and SHA-256 sidecar |
+| Manual package | One component, frontend/banner assets, source docs/licence/blueprint and quality evidence; no generated Wiki pages; exact bytes scanned, deterministic ZIP and SHA-256 sidecar |
 
 `sh scripts/validate.sh` enforces the entire local gate. Runtime containers use `--network none` and read-only source mounts. Public development dependencies can be downloaded while constructing the locked typing image; that build context contains only its Dockerfile/requirements. No tests use live credentials or a live HA installation. Coverage tools are pinned to the supplied images: 7.16.2 on HA 2026.10.0 and 7.17.1 on HA 2026.11.0.
 
@@ -38,6 +38,8 @@ The gate checks exact integer miss counts for every on-disk integration module, 
 The suite preserves the original recovery timing, rolling repair/reload limits, pairing-table preservation, private identity/permission checks and real aiohomekit shutdown classification/cancellation regressions. It adds import rejection, exact protocol spelling, discovery changes, local/admin/Cloud/owner/expiry/body-limit security, partial setup, startup probes, real HA measurement publication, administrator disposal, same-pin reauth, dynamic entities, active/unloaded removal, Repairs lifecycle, foreign registry preservation, atomic cancellation/deletion races and fail-closed pin retention. A lost add reply retains its private pairing-table checkpoint and cannot lead to blind re-add or success without preserved rows and fresh readings.
 
 The Node harness tests selected CSV/JSON upload, explicit controller fields with/without accessory pins, pasted records, authenticated request construction, missing sessions, byte/file limits, server/network errors, field clearing and nonce removal. It simulates DOM/HA boundaries and does not establish full installed-HA browser behavior.
+
+The optional heartbeat blueprint passes HA’s native blueprint loader, input substitution and mocked GitHub importer on both supported versions. Packaging verifies the new blueprint path and exact contents. These checks do not import it into a live installation.
 
 Strict mypy resolves the supported HA source via `MYPYPATH`, checks typed config-entry/runtime/coordinator/callback seams and keeps dynamic wire/storage maps behind validation. Narrow callable casts describe incomplete aiohomekit annotations. Upstream hassfest runs offline; metadata syntax success does not prove future public URLs exist or a HACS/branding submission was accepted.
 

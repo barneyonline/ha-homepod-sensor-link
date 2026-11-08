@@ -178,7 +178,7 @@ class RepositoryContractTests(unittest.TestCase):
                 self.assertRegex(warning["attributes"]["value"].lower(), r"(never|do not).*(keys|credentials)")
 
     def test_watchdog_requires_selected_diagnostics_without_household_ids(self):
-        text = (ROOT / "monitoring/heartbeat-watchdog.yaml").read_text()
+        text = (ROOT / "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml").read_text()
         blueprint = yaml.load(text, Loader=yaml.BaseLoader)
         self.assertEqual(blueprint["blueprint"]["domain"], "automation")
         self.assertIn("monitored_entities", blueprint["blueprint"]["input"])

@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations"><img src="https://img.shields.io/badge/development-experimental-orange" alt="Experimental development"></a>
   <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"><img src="https://img.shields.io/badge/Home_Assistant-2026.10%2B-41BDF5?logo=homeassistant&amp;logoColor=white" alt="Home Assistant 2026.10 or newer"></a>
-  <a href="#get-started"><img src="https://img.shields.io/badge/install-manual-blue" alt="Manual installation"></a>
+  <a href="#get-started"><img src="https://img.shields.io/badge/install-HA_Marketplace-41BDF5" alt="Install through Home Assistant Marketplace"></a>
 </p>
 
 <p align="center">Monitor temperature and humidity. Keep your HomePod sensor connection healthy.</p>
@@ -20,7 +20,7 @@
 </p>
 
 > [!IMPORTANT]
-> This is an unofficial community project, not affiliated with Apple or Home Assistant. **Experimental:** controller-key extraction and real-device setup/recovery still need verification. Read the [known limitations](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations) before installing. No supported release or HACS listing is claimed.
+> HomePod Sensor Link is an independent community project with no affiliation to Apple. **Experimental:** controller-key extraction, device setup and pairing recovery still require real-device verification. Review the [known limitations](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations) before installing. No supported release or HACS listing is claimed.
 
 ## Key features
 
@@ -30,13 +30,18 @@
 - **Optional recovery:** on by default per device, with pinned identities, pairing-preservation checks and persisted repair limits.
 - **Device management and privacy:** resume partial setup, retry or cancel work, and automatically remove owned credentials and recovery history when a device is removed.
 
-Apple documents sensor hardware for HomePod mini and HomePod (2nd generation), software 16.3+. This integration's hardware/firmware compatibility remains unverified.
-
 ## Get started
 
+<!-- ha-marketplace:exclude-start -->
+[![Open HomePod Sensor Link in Home Assistant Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=barneyonline&repository=ha-homepod-sensor-link&category=integration)
+
 1. Read the [credential prerequisite and extraction guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction). A controller key needs its controller ID and accessory public-key pin; a HomeKit setup code is insufficient.
-2. For a development installation, copy `custom_components/homepod_sensor_link` into your HA configuration's `custom_components` directory and restart Home Assistant.
-3. Add **HomePod Sensor Link** in Settings → Devices & services, select your devices and recovery policy, then follow the local credential-import link.
+2. On **HA 2026.11+**, use the button above, or open **Settings → Marketplace → Add from link** and enter `https://github.com/barneyonline/ha-homepod-sensor-link`. Connect GitHub when prompted and add it as an **Integration**.
+3. Open **HomePod Sensor Link**, select **Install**, review the version, and confirm. Follow any restart prompt. There is no published release yet: a `main`/default-branch version is a development build.
+4. Continue the setup prompt, or open **Settings → Devices & services → Add integration → HomePod Sensor Link**. Select your devices and recovery policy, then follow the local credential-import link.
+
+On **HA 2026.10**, [open the repository in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=barneyonline&repository=ha-homepod-sensor-link&category=integration), add it as an **Integration**, download it and restart HA. The [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) includes manual installation. This is a custom repository, not a catalog listing. [HA’s Marketplace instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories).
+<!-- ha-marketplace:exclude-end -->
 
 Requires **Home Assistant 2026.10.0+** (Python **3.14+**).
 

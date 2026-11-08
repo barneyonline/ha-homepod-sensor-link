@@ -5,3 +5,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+  - package-ecosystem: pip
+    directory: /devtools
+    schedule:
+      interval: weekly
+    # Match the Enphase policy: disable routine Python version PRs.
+    # Security update PRs have a separate limit and remain eligible when enabled.
+    open-pull-requests-limit: 0
+    # Only development requirements live here; HA owns runtime dependency pins.

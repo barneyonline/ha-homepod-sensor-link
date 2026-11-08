@@ -185,7 +185,7 @@ class PackagePreflightTests(unittest.TestCase):
                 "LICENSE",
                 "hacs.json",
                 "quality_scale.yaml",
-                "monitoring/heartbeat-watchdog.yaml",
+                "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml",
             ):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,14 +218,15 @@ class PackagePreflightTests(unittest.TestCase):
             with ZipFile(first) as archive:
                 self.assertIsNone(archive.testzip())
                 names = archive.namelist()
-                self.assertIn("wiki/Home.md", names)
+                self.assertFalse(any(name.startswith("wiki/") for name in names))
+                blueprint = "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml"
+                self.assertEqual(archive.read(blueprint), (package.ROOT / blueprint).read_bytes())
                 from scripts.build_wiki import PAGES
 
                 for page in PAGES:
                     for theme in ("light", "dark"):
                         banner = f"docs/images/wiki/{page}-{theme}.jpg"
                         self.assertEqual(archive.read(banner), (package.ROOT / banner).read_bytes())
-                        self.assertIn(f"../{banner}", archive.read(f"wiki/{page}.md").decode())
                 self.assertNotIn("docs/images/wiki/prompts.json", names)
                 self.assertIn(b"GNU GENERAL PUBLIC LICENSE", archive.read("LICENSE"))
                 self.assertIn("docs/images/readme-banner.svg", names)
