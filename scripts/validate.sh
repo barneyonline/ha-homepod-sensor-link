@@ -2,7 +2,6 @@
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 python3 scripts/check_public_content.py --history
-python3 scripts/build_wiki.py --check
 python3 scripts/check_repository.py
 python3 -m unittest discover -s tests -p test_public_content.py -q
 python3 -m unittest discover -s tests -p test_tooling.py -q

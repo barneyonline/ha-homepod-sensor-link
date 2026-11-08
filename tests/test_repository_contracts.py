@@ -46,9 +46,9 @@ class RepositoryContractTests(unittest.TestCase):
             root = Path(directory)
             shutil.copytree(ROOT / "devtools", root / "devtools")
             (root / "quality_scale.yaml").write_text((ROOT / "quality_scale.yaml").read_text())
-            for category in ("custom_components", "tests", "docs"):
+            for category in ("custom_components", "tests"):
                 shutil.copytree(ROOT / category, root / category, ignore=shutil.ignore_patterns("__pycache__"))
-            for file in ("README.md", "SECURITY.md"):
+            for file in ("README.md", "SECURITY.md", "CONTRIBUTING.md"):
                 shutil.copyfile(ROOT / file, root / file)
             claims = yaml.safe_load((root / "quality_scale.yaml").read_text())
             for status in ("exempt", "unknown", "done"):
@@ -57,7 +57,31 @@ class RepositoryContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate(root)
             (root / "quality_scale.yaml").write_text(yaml.safe_dump(claims))
-            (root / "docs/DEPENDENCIES.md").unlink()
+            evidence_path = root / "devtools/quality-evidence.json"
+            evidence = json.loads(evidence_path.read_text())
+            original_docs = evidence["rules"]["dependency-transparency"]["docs"]
+            for reference in (
+                "https://example.invalid/evidence",
+                "http://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started",
+                "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Repository-Standards",
+                "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started?redirect=elsewhere",
+            ):
+                evidence["rules"]["dependency-transparency"]["docs"] = [reference]
+                evidence_path.write_text(json.dumps(evidence))
+                with self.assertRaises(ValueError):
+                    validate(root)
+            evidence["rules"]["dependency-transparency"]["docs"] = original_docs
+            for category in ("code", "tests"):
+                original = evidence["rules"]["dependency-transparency"][category]
+                evidence["rules"]["dependency-transparency"][category] = [
+                    "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
+                ]
+                evidence_path.write_text(json.dumps(evidence))
+                with self.assertRaises(ValueError):
+                    validate(root)
+                evidence["rules"]["dependency-transparency"][category] = original
+            evidence_path.write_text(json.dumps(evidence))
+            (root / "CONTRIBUTING.md").unlink()
             with self.assertRaises(ValueError):
                 validate(root)
 

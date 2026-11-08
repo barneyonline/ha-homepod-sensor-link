@@ -6,6 +6,11 @@ from pathlib import Path
 
 import yaml
 
+try:
+    from .wiki import is_wiki_reference
+except ImportError:
+    from wiki import is_wiki_reference
+
 ROOT = Path(__file__).resolve().parents[1]
 EXEMPTIONS = {"docs-conditions", "docs-triggers", "inject-websession"}
 
@@ -27,6 +32,12 @@ def validate(root=ROOT, *, require_complete=False, require_release_ready=False):
             raise ValueError("Every rule needs explicit source, test and documentation evidence")
         for category in ("code", "tests", "docs"):
             for reference in record[category]:
+                # Wiki content is maintained separately. This checks references,
+                # not remote content or completion of independent release gates.
+                if category == "docs" and is_wiki_reference(reference):
+                    continue
+                if "://" in reference:
+                    raise ValueError("External evidence is limited to declared Wiki documentation")
                 path = (root / reference).resolve()
                 if root.resolve() not in path.parents or not path.is_file() or (root / reference).is_symlink():
                     raise ValueError("Quality evidence references missing or unsafe local content")

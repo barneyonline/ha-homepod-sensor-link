@@ -5,8 +5,8 @@ Describe the trigger, previous behaviour and resulting behaviour.
 ## Validation
 
 - [ ] Ran `sh scripts/validate.sh`; both HA versions, exact full Python/JavaScript coverage, strict typing, hassfest and quality evidence gates pass.
-- [ ] Updated source documentation, translations/action metadata and changelog where needed.
-- [ ] Validated Wiki sources and local links; prepared a separate Wiki export when needed.
+- [ ] Updated the GitHub Wiki, translations/action metadata and changelog where needed.
+- [ ] Checked repository links and Wiki navigation; kept documentation pages in the separate Wiki repository.
 - [ ] Ran the strict working/index/reachable-history public-content audit, or recorded its exact evidence gap.
 - [ ] Used generated disposable identities and documentation-only endpoints.
 

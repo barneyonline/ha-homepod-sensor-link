@@ -5,6 +5,11 @@ from pathlib import Path
 import re
 from urllib.parse import unquote, urlsplit
 
+try:
+    from .wiki import WIKI_URL, is_wiki_reference, check_assets
+except ImportError:
+    from wiki import WIKI_URL, is_wiki_reference, check_assets
+
 ROOT = Path(__file__).resolve().parents[1]
 DOMAIN = "homepod_sensor_link"
 NAME = "HomePod Sensor Link"
@@ -18,6 +23,16 @@ def check_links(root):
             continue
         for target in LINK.findall(source.read_text()):
             parsed = urlsplit(target)
+            if target.startswith(WIKI_URL + "/"):
+                if not is_wiki_reference(target.split("#", 1)[0]):
+                    failures.append(f"Unknown Wiki page in {source.relative_to(root)}")
+                continue
+            repository_prefix = WIKI_URL.removesuffix("/wiki") + "/blob/main/"
+            if target.startswith(repository_prefix):
+                path = (root / unquote(parsed.path.split("/blob/main/", 1)[1])).resolve()
+                if root.resolve() not in path.parents or not path.is_file():
+                    failures.append(f"Broken repository link in {source.relative_to(root)}")
+                continue
             if parsed.scheme or parsed.netloc or not parsed.path:
                 continue
             path = (source.parent / unquote(parsed.path)).resolve()
@@ -34,6 +49,9 @@ def check(root=ROOT):
     strings = json.loads((component / "strings.json").read_text())
     english = json.loads((component / "translations/en.json").read_text())
     failures = check_links(root)
+    check_assets(root)
+    if (root / "wiki").exists() or any((root / "docs").glob("*.md")):
+        failures.append("Maintain documentation pages in the separate GitHub Wiki")
     if manifest["domain"] != DOMAIN or manifest["name"] != NAME or hacs["name"] != NAME:
         failures.append("Integration naming mismatch")
     if hacs["homeassistant"] != versions["home_assistant"][0]:

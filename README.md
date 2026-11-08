@@ -40,7 +40,7 @@
 3. Open **HomePod Sensor Link**, select **Install**, review the version, and confirm. Follow any restart prompt. There is no published release yet: a `main`/default-branch version is a development build.
 4. Continue the setup prompt, or open **Settings → Devices & services → Add integration → HomePod Sensor Link**. Select your devices and recovery policy, then follow the local credential-import link.
 
-On **HA 2026.10**, [open the repository in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=barneyonline&repository=ha-homepod-sensor-link&category=integration), add it as an **Integration**, download it and restart HA. The [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) includes manual installation. This is a custom repository, not a catalog listing. [HA’s Marketplace instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories).
+On **HA 2026.10**, [open the repository in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=barneyonline&repository=ha-homepod-sensor-link&category=integration), add it as an **Integration**, download it and restart HA. See the [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) for detailed installation steps. [HA’s Marketplace instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories).
 <!-- ha-marketplace:exclude-end -->
 
 Requires **Home Assistant 2026.10.0+** (Python **3.14+**).
@@ -71,7 +71,7 @@ python3 scripts/package.py --output /tmp/homepod-sensor-link-local.zip
 
 Automated tests cover HA **2026.10.0** and **2026.11.0** with aiohomekit **4.0.1**. Validation requires **100% Python statements/branches per integration module**, **100% JavaScript lines/branches/functions**, strict typing, hassfest, Ruff and repository/wiki checks. Codecov reports the Python integration coverage; JavaScript is gated separately.
 
-See [contributing](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md), [development](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Development-Environment), [validation evidence](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/docs/VALIDATION.md) and the [Platinum engineering target](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/docs/QUALITY.md). A target is not an awarded Home Assistant quality tier; extraction and real-device verification remain outstanding.
+See [contributing](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md), [development](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Development-Environment), [validation evidence](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/validate.yml) and the [Platinum engineering target](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md#quality-checks). A target is not an awarded Home Assistant quality tier; extraction and real-device verification remain outstanding.
 
 </details>
 
@@ -80,7 +80,7 @@ See [contributing](https://github.com/barneyonline/ha-homepod-sensor-link/blob/m
 [![Hassfest](https://img.shields.io/github/actions/workflow/status/barneyonline/ha-homepod-sensor-link/hassfest.yml?branch=main&label=hassfest)](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/hassfest.yml)
 [![Spelling and workflows](https://img.shields.io/github/actions/workflow/status/barneyonline/ha-homepod-sensor-link/codespell.yml?branch=main&label=spelling%20%26%20workflows)](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/codespell.yml)
 [![Codecov — Python integration](https://codecov.io/gh/barneyonline/ha-homepod-sensor-link/branch/main/graph/badge.svg)](https://app.codecov.io/gh/barneyonline/ha-homepod-sensor-link)
-[![Quality target](https://img.shields.io/badge/quality_target-Platinum-blue)](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/docs/QUALITY.md)
+[![Quality target](https://img.shields.io/badge/quality_target-Platinum-blue)](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md#quality-checks)
 [![Stars](https://img.shields.io/github/stars/barneyonline/ha-homepod-sensor-link)](https://github.com/barneyonline/ha-homepod-sensor-link/stargazers)
 [![License](https://img.shields.io/github/license/barneyonline/ha-homepod-sensor-link)](LICENSE)
 [![Open Issues](https://img.shields.io/github/issues/barneyonline/ha-homepod-sensor-link)](https://github.com/barneyonline/ha-homepod-sensor-link/issues)

@@ -197,7 +197,7 @@ class PackagePreflightTests(unittest.TestCase):
                 package.build(output)
             self.assertFalse(output.exists())
             unexpected.unlink()
-            secret = root / "docs" / "sample.md"
+            secret = root / "README.md"
             secret.write_text("ab" * 32)
             with patch.object(package, "ROOT", root), self.assertRaises(ValueError):
                 package.build(output)
@@ -219,9 +219,10 @@ class PackagePreflightTests(unittest.TestCase):
                 self.assertIsNone(archive.testzip())
                 names = archive.namelist()
                 self.assertFalse(any(name.startswith("wiki/") for name in names))
+                self.assertFalse(any(name.startswith("docs/") and name.endswith(".md") for name in names))
                 blueprint = "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml"
                 self.assertEqual(archive.read(blueprint), (package.ROOT / blueprint).read_bytes())
-                from scripts.build_wiki import PAGES
+                from scripts.wiki import PAGES
 
                 for page in PAGES:
                     for theme in ("light", "dark"):

@@ -10,7 +10,7 @@
         "tests/test_runtime_failures.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Actions are registered during integration setup and survive entry unload; handlers resolve the current runtime."
     },
@@ -23,7 +23,7 @@
         "tests/test_recovery.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "Five-minute fresh sessions, bounded concurrency, startup grace and sample staleness are explicit."
     },
@@ -37,7 +37,7 @@
         "tests/test_quality_lifecycle.py"
       ],
       "docs": [
-        "docs/ARCHITECTURE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Architecture"
       ],
       "comment": "Coordinator, shared entity and typed callback/data seams have dedicated modules."
     },
@@ -50,7 +50,7 @@
         "tests/test_onboarding_v2.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "Actual HA flows cover explicit selection/import, partial results, cancellation and discovery."
     },
@@ -63,7 +63,7 @@
         "tests/test_quality_lifecycle.py"
       ],
       "docs": [
-        "docs/VALIDATION.md"
+        "CONTRIBUTING.md"
       ],
       "comment": "The exact per-module gate requires zero uncovered flow statements and branches."
     },
@@ -76,8 +76,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/QUALITY_RESEARCH.md",
-        "docs/DEPENDENCIES.md"
+        "CONTRIBUTING.md"
       ],
       "comment": "Tagged aiohomekit source, package provenance and direct/core-provided dependency ownership are recorded; runtime versions are asserted."
     },
@@ -91,7 +90,7 @@
         "tests/test_onboarding_v2.py"
       ],
       "docs": [
-        "docs/ARCHITECTURE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Architecture"
       ],
       "comment": "Coordinator subscriptions register unload callbacks and measurement tracking is removed during entity lifecycle cleanup."
     },
@@ -104,7 +103,7 @@
         "tests/test_onboarding_v2.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Persisted per-device keys determine stable measurement and status unique IDs across retry/restart."
     },
@@ -116,7 +115,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Names are translated with device context; entity naming is enabled."
     },
@@ -129,7 +128,7 @@
         "tests/test_runtime_failures.py"
       ],
       "docs": [
-        "docs/ARCHITECTURE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Architecture"
       ],
       "comment": "HomePodConfigEntry is ConfigEntry[Runtime]; runtime data and coordinator snapshots are typed."
     },
@@ -143,7 +142,7 @@
         "tests/test_durable_edges.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "Credential preparation performs bounded read-only authentication and preserves failed/pending results honestly."
     },
@@ -156,7 +155,7 @@
         "tests/test_preflight.py"
       ],
       "docs": [
-        "docs/ARCHITECTURE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Architecture"
       ],
       "comment": "Read-only preflight precedes platform creation. All-network failure retries; authentication/pin failure stays isolated for guarded recovery/diagnostics."
     },
@@ -170,7 +169,7 @@
         "tests/test_onboarding_v2.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "Singleton flow identity and an owner claimed before awaits prevent duplicate engines."
     },
@@ -184,7 +183,7 @@
         "tests/test_runtime_failures.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Unavailable runtime and operational action failures raise controlled translated HA exceptions."
     },
@@ -198,7 +197,7 @@
         "tests/test_runtime_failures.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "Failed platform unload preserves ownership; successful stop drains tasks and closes transports."
     },
@@ -210,7 +209,7 @@
         "tests/test_onboarding_v2.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Measurements require fresh verified samples and valid device lifecycle; diagnostics retain explanatory state."
     },
@@ -224,7 +223,7 @@
         "tests/test_backend_edges.py"
       ],
       "docs": [
-        "docs/TROUBLESHOOTING.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Troubleshooting-and-Support"
       ],
       "comment": "Deduplicated controlled failure/recovery transitions omit credentials, identities and raw messages."
     },
@@ -237,7 +236,7 @@
         "tests/test_onboarding_v2.py"
       ],
       "docs": [
-        "docs/ARCHITECTURE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Architecture"
       ],
       "comment": "Coordinator entities declare PARALLEL_UPDATES=0; independent peers run concurrently and writes retain per-engine serialization."
     },
@@ -251,7 +250,7 @@
         "tests/test_quality_lifecycle.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "A real reauth route uses the local administrator import and preserves both pins, keys and repair history."
     },
@@ -263,7 +262,7 @@
         "tests/test_tooling.py"
       ],
       "docs": [
-        "docs/VALIDATION.md"
+        "CONTRIBUTING.md"
       ],
       "comment": "Every packaged Python module must have exactly 100% statement and branch coverage on both HA versions; no exclusions or tolerated misses."
     },
@@ -276,7 +275,7 @@
         "tests/test_runtime_completion.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Owned devices carry Apple context and preserve foreign/native registry records; no invented firmware metadata."
     },
@@ -303,7 +302,7 @@
         "tests/test_boundary_failures.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "HAP discovery offers HomePod candidates and native adoption without replacing trusted pins."
     },
@@ -315,7 +314,7 @@
         "tests/test_backend_edges.py"
       ],
       "docs": [
-        "docs/ARCHITECTURE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Architecture"
       ],
       "comment": "Every fresh session resolves current endpoints and checks the stable accessory pin before trusting the peer."
     },
@@ -328,7 +327,7 @@
         "tests/test_quality_lifecycle.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "Explicitly prepared additional devices are added through coordinator listeners without reloading healthy peers; unselected discoveries are never commissioned."
     },
@@ -340,7 +339,7 @@
         "tests/test_onboarding_v2.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Access health is diagnostic; temperature/humidity are primary measurements."
     },
@@ -352,7 +351,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Temperature/humidity have proper sensor classes/units and state class; access health is an enum."
     },
@@ -364,9 +363,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
-      "comment": "Only primary measurements and the integration’s essential access-health entity are enabled; optional telemetry is attributes rather than extra enabled entities."
+      "comment": "Only primary measurements and the integration\u2019s essential access-health entity are enabled; optional telemetry is attributes rather than extra enabled entities."
     },
     "entity-translations": {
       "code": [
@@ -377,7 +376,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Measurement names and finite access-state labels use translated entity keys."
     },
@@ -390,7 +389,7 @@
         "tests/test_preflight.py"
       ],
       "docs": [
-        "docs/TROUBLESHOOTING.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Troubleshooting-and-Support"
       ],
       "comment": "Public setup/action errors use translated controlled messages, never raw response/exception text."
     },
@@ -402,7 +401,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
       "comment": "Access health icon uses the supported entity icon mapping."
     },
@@ -414,7 +413,7 @@
         "tests/test_flow_lifecycle.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "Reconfiguration supports per-device policy, import, Resume, Cancel and removal without resetting safety history."
     },
@@ -429,7 +428,7 @@
         "tests/test_preflight.py"
       ],
       "docs": [
-        "docs/TROUBLESHOOTING.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Troubleshooting-and-Support"
       ],
       "comment": "Credential, sensor access, competing engine and global check failures create actionable translated Repairs; issues survive unload and clear on resolution/removal."
     },
@@ -443,7 +442,7 @@
         "tests/test_runtime_failures.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
       "comment": "Explicit user removal is supported; mDNS disappearance alone cannot safely prove a stale device."
     },
@@ -458,7 +457,7 @@
         "tests/test_durable_edges.py"
       ],
       "docs": [
-        "docs/DEPENDENCIES.md"
+        "CONTRIBUTING.md"
       ],
       "comment": "aiohomekit network I/O is asynchronous; blocking protected journal work runs in drained executor jobs."
     },
@@ -471,7 +470,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/DEVELOPMENT.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Development-Environment"
       ],
       "comment": "Strict mypy checks all packaged modules against the supported HA source, without disabled checks or ignored local errors."
     },
@@ -483,9 +482,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-high-level-description": {
       "code": [
@@ -497,7 +496,7 @@
       "docs": [
         "README.md"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-installation-instructions": {
       "code": [
@@ -507,9 +506,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-removal-instructions": {
       "code": [
@@ -519,9 +518,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-configuration-parameters": {
       "code": [
@@ -531,9 +530,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-installation-parameters": {
       "code": [
@@ -543,9 +542,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/EXTRACTION.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-data-update": {
       "code": [
@@ -555,9 +554,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/SETUP.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-examples": {
       "code": [
@@ -567,9 +566,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/AUTOMATIONS.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Automation-Examples"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-known-limitations": {
       "code": [
@@ -579,9 +578,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/LIMITATIONS.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-supported-devices": {
       "code": [
@@ -591,9 +590,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/LIMITATIONS.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-supported-functions": {
       "code": [
@@ -603,9 +602,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/USAGE.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-troubleshooting": {
       "code": [
@@ -615,9 +614,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/TROUBLESHOOTING.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Troubleshooting-and-Support"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-use-cases": {
       "code": [
@@ -627,9 +626,9 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/AUTOMATIONS.md"
+        "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Automation-Examples"
       ],
-      "comment": "Canonical documentation covers this requirement, distinguishes actual local behavior from unverified external/hardware claims, and is checked for broken links/wiki drift."
+      "comment": "Project documentation covers this requirement; repository links and declared Wiki page references are checked without fetching remote content."
     },
     "docs-conditions": {
       "code": [
@@ -639,7 +638,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/QUALITY_RESEARCH.md",
+        "CONTRIBUTING.md",
         "SECURITY.md"
       ],
       "comment": "No custom condition platform is supplied."
@@ -652,7 +651,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/QUALITY_RESEARCH.md",
+        "CONTRIBUTING.md",
         "SECURITY.md"
       ],
       "comment": "No custom trigger platform is supplied; ordinary automation examples use HA state/time triggers."
@@ -665,7 +664,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/QUALITY_RESEARCH.md",
+        "CONTRIBUTING.md",
         "SECURITY.md"
       ],
       "comment": "Encrypted HAP uses custom asyncio socket framing; aiohomekit has no aiohttp/httpx session injection API. HA AsyncZeroconf is injected; revisit if an outbound HTTP client is added."
@@ -678,7 +677,7 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/QUALITY_RESEARCH.md",
+        "CONTRIBUTING.md",
         "SECURITY.md"
       ],
       "comment": "Accepted upstream Home Assistant branding requires a separately authorised public submission and acceptance. Local artwork does not prove acceptance."
@@ -691,10 +690,10 @@
         "tests/test_repository_contracts.py"
       ],
       "docs": [
-        "docs/QUALITY_RESEARCH.md",
+        "CONTRIBUTING.md",
         "SECURITY.md"
       ],
-      "comment": "The proposed @barneyonline metadata follows the user’s existing repositories; public support commitment and a real private security reporting route still require confirmation before distribution."
+      "comment": "The proposed @barneyonline metadata follows the user\u2019s existing repositories; public support commitment and a real private security reporting route still require confirmation before distribution."
     }
   },
   "release_gates": {

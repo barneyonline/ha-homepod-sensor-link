@@ -43,7 +43,6 @@ def build(output):
             "blueprints/automation/homepod_sensor_link/heartbeat-watchdog.yaml",
         )
     )
-    files.extend(sorted((ROOT / "docs").glob("*.md")))
     files.extend(sorted((ROOT / "docs/images").glob("*.svg")))
     for filename in ("readme-banner-light.png", "readme-banner-dark.png"):
         files.extend((ROOT / "docs/images").glob(filename))
