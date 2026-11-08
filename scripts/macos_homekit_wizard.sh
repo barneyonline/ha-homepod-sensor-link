@@ -328,7 +328,7 @@ run_wizard() {
     ask hsl_certificate 'Certificate name (not a key):'
     [[ -n "$hsl_certificate" ]] || exit 1
     confirm 'Sign the bundled helper with this certificate, then export com.apple.hap.pairing privately?' || exit 1
-    # Record restoration as the next task before invoking the third-party tool.
+    # Record restoration as the next task before invoking the bundled helper.
     "$hsl_python" "$hsl_helper" extracted "$hsl_directory"
     if ! (
       set -o noclobber
@@ -348,20 +348,28 @@ run_wizard() {
   stage 'Verify restoration and prepare the selected import'
   "$hsl_python" "$hsl_helper" check-restored "$hsl_directory"
   say 'SIP and the original boot arguments are restored; the running kernel has no AMFI override.'
-  [[ -s "$hsl_directory/homekit-keys.txt" && ! -L "$hsl_directory/homekit-keys.txt" ]] || {
-    warn 'No private dump is available. Protections are restored; use the manual extraction guide.'
-    exit 1
-  }
-  say 'Open homekit-keys.txt locally. Find the HomeKit Pairing Identity and selected Paired HomeKit Accessory records.'
-  say 'Stop if keys are missing or shown only as binary placeholders. Do not guess which identity is authorised.'
-  confirm 'Ready to enter only the selected credentials into a private JSON bundle?' || exit 1
-  "$hsl_python" "$hsl_helper" export "$hsl_directory"
+  if [[ "$hsl_phase" == complete ]]; then
+    "$hsl_python" "$hsl_helper" result "$hsl_directory"
+  else
+    [[ -s "$hsl_directory/homekit-keys.txt" && ! -L "$hsl_directory/homekit-keys.txt" ]] || {
+      warn 'No private dump is available. Protections are restored; use the manual extraction guide.'
+      exit 1
+    }
+    say 'The wizard will read the private dump automatically and show identifiers for selection. Keys stay hidden.'
+    say 'Choose the controller identities and accessory identifiers for your intended HomePods using their menu numbers.'
+    say 'Once the generated JSON is saved and verified, the temporary extracted key dump will be deleted.'
+    confirm 'Ready to create the selected JSON automatically and remove its temporary key dump?' || exit 1
+    "$hsl_python" "$hsl_helper" export "$hsl_directory"
+  fi
+  (set +u; finish)
+  # finish clears the terminal; keep the saved file and HA handoff visible afterward.
+  "$hsl_python" "$hsl_helper" result "$hsl_directory"
   say 'In HA: Settings → Devices & services → Add integration → HomePod Sensor Link.'
   say 'Choose your devices, then Paste a CSV or JSON export. Paste the selected JSON file contents.'
   say 'Use a local administrator session over HTTPS. HA verifies identities, key pairs, pins and permissions.'
-  say 'After successful setup, remove unnecessary dump/export copies and clear copied keys from the clipboard.'
+  say 'After HomePod Sensor Link setup succeeds, delete the JSON file or move it to secure encrypted storage.'
+  say 'Clear copied keys from the clipboard and remove any other unnecessary export copies.'
   say 'Keep this folder private. It contains controller credentials; never attach it to an issue.'
-  (set +u; finish)
   exit 0
 }
 

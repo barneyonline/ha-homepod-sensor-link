@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add a guided macOS Terminal wizard and bundled Swift helper for user-authorised HomeKit extraction, with private progress across reboots, saved restoration instructions, and selected JSON preparation after security settings are restored. The helper compiles against Apple frameworks without the unavailable CodeSignKit/FoundationKit/LoggerKit packages. Signing/export require confirmation; security changes and restarts remain manual. Hardware verification is still outstanding.
+- Add a guided macOS Terminal wizard and bundled Swift helper for user-authorised HomeKit extraction, with private progress across reboots, saved restoration instructions, and automatic JSON generation after security settings are restored. Select records by menu number without copying keys; remove the temporary key dump after verifying the saved JSON, and advise deleting or securely storing the JSON after HA setup succeeds. The helper compiles against Apple frameworks without the unavailable CodeSignKit/FoundationKit/LoggerKit packages. Signing/export require confirmation; security changes and restarts remain manual. Hardware verification is still outstanding.
 - Choose a HomePod before opening its native action menu, with descriptions, a recovery action matching its current setting and a review step before changes. Require explicit confirmation before deleting local credentials and recovery history.
 
 - Clarify the confirmation shown after adding HomePods to an existing setup.

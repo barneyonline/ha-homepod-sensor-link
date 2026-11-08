@@ -133,6 +133,11 @@ enum HomeKitExportTests {
             try testQuery()
             try testRecords()
             try testOutputPermissions()
+            if CommandLine.arguments.count == 2 {
+                let destination = URL(fileURLWithPath: CommandLine.arguments[1])
+                let data = renderHomeKitRecords(try homeKitRecords(from: fixtures()))
+                try data.write(to: destination, options: .withoutOverwriting)
+            }
             print("Native helper synthetic tests passed: scoped queries, key validation, failures and private output.")
         } catch let failure as SyntheticTestFailure {
             FileHandle.standardError.write(Data(("Synthetic test failed: " + failure.label + "\n").utf8))

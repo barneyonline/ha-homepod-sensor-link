@@ -23,6 +23,23 @@ def saved_state(original=None, phase="extract", *, binary=False):
     return {"phase": phase, "original": original, "plist": base64.b64encode(raw).decode()}
 
 
+def dump_fixture(*, controllers=1, accessories=1):
+    """Disposable bytes for format tests; native tests also verify actual key pairs."""
+    bundle, blocks = {"controllers": [], "accessories": []}, []
+    for number in range(controllers):
+        public, seed = secrets.token_hex(32), secrets.token_hex(32)
+        account = "synthetic-Controller-" + str(number)
+        bundle["controllers"].append({"iOSPairingId": account, "iOSDeviceLTPK": public, "iOSDeviceLTSK": seed})
+        blocks.append(
+            "HomeKit Pairing Identity (com.apple.hap.pairing)\nAccount: " + account + "\nKey: " + public + seed
+        )
+    for number in range(accessories):
+        account, public = "synthetic-Accessory-" + str(number), secrets.token_hex(32)
+        bundle["accessories"].append({"AccessoryPairingID": account, "AccessoryLTPK": public})
+        blocks.append("Paired HomeKit Accessory (com.apple.hap.pairing)\nAccount: " + account + "\nKey: " + public)
+    return bundle, ("\n\n".join(blocks) + "\n").encode()
+
+
 class WizardTests(unittest.TestCase):
     def test_prepared_tool_must_remain_in_its_private_source_tree(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -213,28 +230,88 @@ class WizardTests(unittest.TestCase):
             with self.assertRaises(wizard.WizardError):
                 wizard.load_state(directory)
 
-    def test_selected_keys_are_normalised_without_echoing_them(self):
-        public, seed, accessory = (secrets.token_hex(32) for _ in range(3))
-        values = iter(
-            ("Synthetic-Controller", "“" + public + "+" + seed + "”", "Synthetic-Accessory", "0x" + accessory)
-        )
+    def test_private_dump_is_parsed_without_prompting_for_or_echoing_keys(self):
+        bundle, dump = dump_fixture()
         output = io.StringIO()
         with redirect_stdout(output):
-            bundle = wizard.collect_credentials(secret=lambda _prompt: next(values), prompt=lambda _prompt: "1")
-        self.assertEqual(bundle["controllers"][0]["iOSDeviceLTSK"], seed)
-        self.assertEqual(bundle["controllers"][0]["iOSDeviceLTPK"], public)
-        self.assertEqual(bundle["accessories"][0]["AccessoryLTPK"], accessory)
-        for value in (public, seed, accessory):
-            self.assertNotIn(value, output.getvalue())
-        for invalid in ("64 bytes (binary)", "not-a-key", seed[:-1]):
+            self.assertEqual(wizard.parse_dump(dump), bundle)
+            self.assertEqual(wizard.parse_dump(dump.replace(b"\n", b"\r\n")), bundle)
+            self.assertEqual(wizard.parse_dump(dump + b"\n" + dump), bundle)
+        self.assertEqual(output.getvalue(), "")
+        for invalid in ("64 bytes (binary)", "not-a-key", secrets.token_hex(31)):
             with self.assertRaises(wizard.WizardError):
                 wizard.hexadecimal(invalid, 64)
-        for invalid in ("", "line\nbreak", "x" * 257):
+        for invalid in ("", "line\nbreak", "hidden\x7fcontrol", "x" * 257):
             with self.assertRaises(wizard.WizardError):
                 wizard.identifier(invalid)
-        for invalid in ("zero", "0", "4"):
-            with self.assertRaises(wizard.WizardError):
-                wizard.collect_credentials(prompt=lambda _prompt: invalid)
+
+    def test_incomplete_unrelated_oversized_and_conflicting_dumps_are_refused(self):
+        bundle, dump = dump_fixture()
+        first = bundle["controllers"][0]
+        accessory = bundle["accessories"][0]
+        for invalid in (
+            b"",
+            b"\xff",
+            b"x" * 1048577,
+            dump * 257,
+            dump.replace(b"com.apple.hap.pairing", b"unrelated.group"),
+            dump.replace(b"Account:", b"Unexpected:"),
+            dump.replace(first["iOSDeviceLTSK"].encode(), b"32 bytes (binary)"),
+            dump.replace(b"Key:", b"Key: \nExtra:"),
+            dump_fixture(controllers=0)[1],
+            dump_fixture(accessories=0)[1],
+            dump + b"\n" + dump.replace(accessory["AccessoryLTPK"].encode(), secrets.token_hex(32).encode()),
+            dump
+            + b"\n"
+            + dump.replace(accessory["AccessoryPairingID"].encode(), accessory["AccessoryPairingID"].upper().encode()),
+        ):
+            with self.subTest(size=len(invalid)), self.assertRaises(wizard.WizardError) as error:
+                wizard.parse_dump(invalid)
+            self.assertNotIn(first["iOSDeviceLTSK"], str(error.exception))
+
+    def test_numbered_selection_keeps_keys_hidden_and_handles_single_records(self):
+        bundle, _ = dump_fixture(accessories=2)
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(
+                wizard.select_records(bundle["accessories"], "Accessories", "AccessoryPairingID", 64, lambda _: "2"),
+                bundle["accessories"][1:],
+            )
+            self.assertEqual(
+                wizard.select_records(bundle["accessories"], "Accessories", "AccessoryPairingID", 64, lambda _: "all"),
+                bundle["accessories"],
+            )
+            self.assertEqual(
+                wizard.select_records(
+                    bundle["accessories"], "Accessories", "AccessoryPairingID", 64, lambda _: "2,1,2"
+                ),
+                bundle["accessories"],
+            )
+            with patch("builtins.input", side_effect=AssertionError("Single records need no selection prompt")):
+                self.assertEqual(
+                    wizard.select_records(bundle["controllers"], "Controllers", "iOSPairingId", 3),
+                    bundle["controllers"],
+                )
+        for record in bundle["accessories"]:
+            self.assertIn(record["AccessoryPairingID"], output.getvalue())
+            self.assertNotIn(record["AccessoryLTPK"], output.getvalue())
+        for invalid in ("", "zero", "0", "3", "-1", "all"):
+            with redirect_stdout(io.StringIO()), self.assertRaises(wizard.WizardError):
+                wizard.select_records(bundle["accessories"], "Accessories", "AccessoryPairingID", 1, lambda _: invalid)
+        too_many, _ = dump_fixture(controllers=4)
+        with redirect_stdout(io.StringIO()), self.assertRaises(wizard.WizardError):
+            wizard.select_records(too_many["controllers"], "Controllers", "iOSPairingId", 3, lambda _: "all")
+
+    def test_invalid_dump_never_creates_an_import_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = wizard.private_directory(Path(temporary).resolve() / "private")
+            wizard.private_write(directory, "homekit-keys.txt", b"Failed extraction; no usable records.")
+            with (
+                patch.object(wizard, "check_restored"),
+                redirect_stdout(io.StringIO()),
+                self.assertRaises(wizard.WizardError),
+            ):
+                wizard.export_credentials(directory, saved_state(phase="restore"))
+            self.assertFalse(list(directory.glob("homepod-import-*.json")))
 
     def test_cli_keeps_format_errors_and_export_input_private(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -257,30 +334,96 @@ class WizardTests(unittest.TestCase):
             self.assertIn("interactively", output.getvalue())
 
     def test_export_checks_restoration_before_prompting_and_writes_private_json(self):
-        bundle = {
-            "controllers": [{"iOSPairingId": "synthetic-controller", "iOSDeviceLTSK": secrets.token_hex(32)}],
-            "accessories": [{"AccessoryPairingID": "synthetic-accessory", "AccessoryLTPK": secrets.token_hex(32)}],
-        }
+        bundle, dump = dump_fixture(accessories=2)
+        selected = {**bundle, "accessories": bundle["accessories"][1:]}
         with tempfile.TemporaryDirectory() as temporary:
             directory = wizard.private_directory(Path(temporary).resolve() / "private")
+            wizard.private_write(directory, "homekit-keys.txt", dump)
+            wizard.private_write(directory, "unrelated-certificate.txt", b"synthetic certificate placeholder")
             state = saved_state(phase="restore")
             with (
                 patch.object(wizard, "check_restored", side_effect=wizard.WizardError("locked")),
-                patch.object(wizard, "collect_credentials") as collect,
+                patch.object(wizard, "private_read") as read,
                 self.assertRaises(wizard.WizardError),
             ):
                 wizard.export_credentials(directory, state)
-            collect.assert_not_called()
+            read.assert_not_called()
             with (
                 patch.object(wizard, "check_restored"),
-                patch.object(wizard, "collect_credentials", return_value=bundle),
                 redirect_stdout(io.StringIO()) as output,
             ):
-                wizard.export_credentials(directory, state)
-                wizard.export_credentials(directory, state)
+                wizard.export_credentials(directory, state, lambda _: "2")
+                wizard.completed_export(directory, wizard.load_state(directory))
             files = list(directory.glob("homepod-import-*.json"))
-            self.assertEqual(len(files), 2)
+            self.assertEqual(len(files), 1)
             for path in files:
-                self.assertEqual(json.loads(wizard.private_read(path)), bundle)
+                self.assertEqual(json.loads(wizard.private_read(path)), selected)
             self.assertEqual(wizard.load_state(directory)["phase"], "complete")
             self.assertNotIn(bundle["controllers"][0]["iOSDeviceLTSK"], output.getvalue())
+            self.assertFalse((directory / "homekit-keys.txt").exists())
+            self.assertEqual(
+                wizard.private_read(directory / "unrelated-certificate.txt"), b"synthetic certificate placeholder"
+            )
+
+    def test_failed_write_state_save_or_readback_keeps_the_original_dump(self):
+        for failure in ("write", "state", "readback"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                directory = wizard.private_directory(Path(temporary).resolve() / "private")
+                _, dump = dump_fixture()
+                wizard.private_write(directory, "homekit-keys.txt", dump)
+                original_read = wizard.private_read
+
+                def readback(path, limit=131072):
+                    data = original_read(path, limit)
+                    return b"mismatched JSON" if Path(path).name.startswith("homepod-import-") else data
+
+                targets = {
+                    "write": patch.object(wizard.os, "fsync", side_effect=OSError("synthetic write failure")),
+                    "state": patch.object(wizard, "save_state", side_effect=OSError("synthetic state failure")),
+                    "readback": patch.object(wizard, "private_read", side_effect=readback),
+                }
+                with (
+                    patch.object(wizard, "check_restored"),
+                    targets[failure],
+                    redirect_stdout(io.StringIO()),
+                    self.assertRaises((OSError, wizard.WizardError)),
+                ):
+                    wizard.export_credentials(directory, saved_state(phase="restore"))
+                self.assertEqual(wizard.private_read(directory / "homekit-keys.txt"), dump)
+
+    def test_cleanup_retry_checks_both_files_and_reuses_the_completed_json(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = wizard.private_directory(Path(temporary).resolve() / "private")
+            _, dump = dump_fixture()
+            wizard.private_write(directory, "homekit-keys.txt", dump)
+            with (
+                patch.object(wizard, "check_restored"),
+                patch.object(Path, "unlink", side_effect=OSError("synthetic cleanup failure")),
+                redirect_stdout(io.StringIO()),
+                self.assertRaises(wizard.WizardError),
+            ):
+                wizard.export_credentials(directory, saved_state(phase="restore"))
+            state = wizard.load_state(directory)
+            path = directory / state["export_file"]
+            original_json = wizard.private_read(path)
+            self.assertEqual(wizard.private_read(directory / "homekit-keys.txt"), dump)
+            wizard.private_write(directory, path.name, b"changed JSON")
+            with patch.object(wizard, "check_restored"), self.assertRaises(wizard.WizardError):
+                wizard.completed_export(directory, state)
+            self.assertTrue((directory / "homekit-keys.txt").exists())
+            wizard.private_write(directory, path.name, original_json)
+            wizard.private_write(directory, "homekit-keys.txt", dump + b"\n")
+            with patch.object(wizard, "check_restored"), self.assertRaises(wizard.WizardError):
+                wizard.completed_export(directory, state)
+            self.assertTrue((directory / "homekit-keys.txt").exists())
+            wizard.private_write(directory, "homekit-keys.txt", dump)
+            with patch.object(wizard, "check_restored"), redirect_stdout(io.StringIO()):
+                self.assertEqual(wizard.completed_export(directory, state), path)
+            self.assertFalse((directory / "homekit-keys.txt").exists())
+            self.assertEqual(wizard.private_read(path), original_json)
+            self.assertEqual(len(list(directory.glob("homepod-import-*.json"))), 1)
+            wizard.private_write(
+                directory, wizard.STATE_FILE, json.dumps({**state, "export_file": "../elsewhere.json"}).encode()
+            )
+            with self.assertRaises(wizard.WizardError):
+                wizard.load_state(directory)

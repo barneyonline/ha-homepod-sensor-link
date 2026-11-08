@@ -6,7 +6,7 @@ This helper never changes NVRAM, SIP, pairings or Home Assistant storage.
 
 import argparse
 import base64
-import getpass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -139,8 +139,21 @@ def check_initial():
 def load_state(directory):
     try:
         state = json.loads(private_read(directory / STATE_FILE))
-        if set(state) != {"phase", "original", "plist"} or state["phase"] not in {"extract", "restore", "complete"}:
+        base = {"phase", "original", "plist"}
+        result = {"export_file", "export_sha256", "dump_sha256"}
+        if set(state) not in (base, base | result) or state["phase"] not in {"extract", "restore", "complete"}:
             raise ValueError
+        if set(state) == base | result:
+            if (
+                state["phase"] != "complete"
+                or not isinstance(state["export_file"], str)
+                or not re.fullmatch(r"homepod-import-[a-zA-Z0-9_-]+\.json", state["export_file"])
+                or any(
+                    not isinstance(state[k], str) or not re.fullmatch(r"[0-9a-f]{64}", state[k])
+                    for k in result - {"export_file"}
+                )
+            ):
+                raise ValueError
         original = state["original"]
         if original is not None and (not isinstance(original, str) or any(ord(c) < 32 for c in original)):
             raise ValueError
@@ -215,8 +228,8 @@ def restoration_instructions(directory, state):
 
 
 def identifier(value):
-    if not value or len(value) > 256 or any(ord(c) < 32 for c in value):
-        raise WizardError("Identifier missing or invalid; copy the exact Account field without changing its case.")
+    if not value or len(value) > 256 or not value.isprintable():
+        raise WizardError("An extracted Account is missing or invalid; identifiers must remain unchanged.")
     return value
 
 
@@ -227,39 +240,134 @@ def hexadecimal(value, length):
     return value.lower()
 
 
-def collect_credentials(secret=getpass.getpass, prompt=input):
-    controllers, accessories = [], []
-    for records, label, maximum in ((controllers, "controller identities", 3), (accessories, "selected HomePods", 64)):
-        try:
-            count = int(prompt("Number of " + label + " to include: "))
-        except ValueError:
-            raise WizardError("Enter a whole-number record count.") from None
-        if not 1 <= count <= maximum:
-            raise WizardError("Record count is outside the supported range.")
-        for number in range(1, count + 1):
-            account = identifier(secret("Record " + str(number) + " — exact Account (hidden): "))
-            if records is controllers:
-                value = secret("Identity Key (public+private), or just its 64-character private seed (hidden): ")
-                value = value.strip().strip('"“”').removeprefix("0x").replace("+", "")
-                if len(value) == 128:
-                    combined = hexadecimal(value, 128)
-                    record = {"iOSPairingId": account, "iOSDeviceLTPK": combined[:64], "iOSDeviceLTSK": combined[64:]}
-                else:
-                    record = {"iOSPairingId": account, "iOSDeviceLTSK": hexadecimal(value, 64)}
-            else:
-                record = {
-                    "AccessoryPairingID": account,
-                    "AccessoryLTPK": hexadecimal(secret("Accessory public Key (hidden): "), 64),
-                }
-            records.append(record)
-    return {"controllers": controllers, "accessories": accessories}
+def parse_dump(content):
+    """Convert only the bundled helper's complete records; never print input."""
+    if len(content) > 1048576:
+        raise WizardError("The private key dump exceeds the supported size.")
+    try:
+        text = content.decode("utf-8") if isinstance(content, bytes) else content
+    except UnicodeDecodeError:
+        raise WizardError("The private key dump is not valid text.") from None
+    headers = {
+        "HomeKit Pairing Identity (com.apple.hap.pairing)": "controllers",
+        "Paired HomeKit Accessory (com.apple.hap.pairing)": "accessories",
+    }
+    records = {"controllers": {}, "accessories": {}}
+    blocks, current = [], []
+    for line in text.splitlines():
+        if line:
+            current.append(line)
+        elif current:
+            blocks.append(current)
+            current = []
+    if current:
+        blocks.append(current)
+    if not 1 <= len(blocks) <= 512:
+        raise WizardError("The private key dump has no records or exceeds the supported record count.")
+    for block in blocks:
+        if (
+            len(block) != 3
+            or block[0] not in headers
+            or not block[1].startswith("Account: ")
+            or not block[2].startswith("Key: ")
+        ):
+            raise WizardError("The private key dump is incomplete or is not from the bundled helper.")
+        kind = headers[block[0]]
+        account = identifier(block[1][len("Account: ") :])
+        key = hexadecimal(block[2][len("Key: ") :], 128 if kind == "controllers" else 64)
+        if kind == "controllers":
+            record = {"iOSPairingId": account, "iOSDeviceLTPK": key[:64], "iOSDeviceLTSK": key[64:]}
+        else:
+            record = {"AccessoryPairingID": account, "AccessoryLTPK": key}
+        lookup = account if kind == "controllers" else account.lower()
+        previous = records[kind].get(lookup)
+        if previous is not None and previous != record:
+            raise WizardError("Conflicting extracted records share an identifier; no JSON was created.")
+        records[kind][lookup] = record
+    if not records["controllers"] or not records["accessories"]:
+        raise WizardError("The dump must contain a controller identity and a paired accessory.")
+    return {kind: list(values.values()) for kind, values in records.items()}
 
 
-def export_credentials(directory, state):
+def select_records(records, label, field, maximum, prompt=None):
+    """Choose identifiers by number; key values never become prompt text."""
+    prompt = prompt or input
+    print(label + " (identifiers only; keys stay hidden):")
+    for number, record in enumerate(records, 1):
+        print("  " + str(number) + ". " + record[field])
+    if len(records) == 1:
+        print("Using the only available record.")
+        return records[:]
+    response = prompt("Choose numbers separated by commas, or 'all' (maximum " + str(maximum) + "): ")
+    try:
+        choices = (
+            set(range(1, len(records) + 1))
+            if response.strip().lower() == "all"
+            else {int(value) for value in response.replace(",", " ").split()}
+        )
+    except ValueError:
+        raise WizardError("Choose records using the displayed numbers; no keys need copying.") from None
+    if not choices or len(choices) > maximum or min(choices) < 1 or max(choices) > len(records):
+        raise WizardError("Selection is empty, out of range or exceeds the supported record count.")
+    return [records[number - 1] for number in sorted(choices)]
+
+
+def sync_directory(directory):
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def completed_export(directory, state):
+    """Recover completed output and retry cleanup without requesting secrets."""
     check_restored(state)
-    print("Open homekit-keys.txt in a local text editor. Copy only the records for your selected HomePods.")
-    print("Inputs are hidden. HA will verify key pairs, accessory pins and administrator permission on import.")
-    bundle = collect_credentials()
+    if state["phase"] != "complete" or "export_file" not in state:
+        raise WizardError("There is no recorded completed JSON export.")
+    path = directory / state["export_file"]
+    try:
+        content = private_read(path)
+    except FileNotFoundError:
+        raise WizardError(
+            "The saved JSON is missing. If you already imported and deleted it, no further cleanup is needed."
+        ) from None
+    if hashlib.sha256(content).hexdigest() != state["export_sha256"]:
+        raise WizardError("The saved JSON has changed; the temporary key dump was retained.")
+    dump = directory / "homekit-keys.txt"
+    try:
+        raw = private_read(dump, limit=1048576)
+    except FileNotFoundError:
+        raw = None
+    except (OSError, WizardError):
+        raise WizardError(
+            "JSON is ready, but temporary dump cleanup failed. Keep the folder private and retry the wizard."
+        ) from None
+    if raw is not None:
+        if hashlib.sha256(raw).hexdigest() != state["dump_sha256"]:
+            raise WizardError("The temporary dump has changed since conversion; it was retained.")
+        try:
+            dump.unlink()
+            sync_directory(directory)
+        except OSError:
+            raise WizardError(
+                "JSON is ready, but temporary dump cleanup could not be confirmed. Retry the wizard."
+            ) from None
+    print("Selected credential bundle saved privately to: " + str(path))
+    print("Temporary extracted key dump removed. Signing certificates were not changed.")
+    return path
+
+
+def export_credentials(directory, state, prompt=None):
+    check_restored(state)
+    raw = private_read(directory / "homekit-keys.txt", limit=1048576)
+    extracted = parse_dump(raw)
+    print("Keys were read automatically from the private dump. No credential values need typing or copying.")
+    print("Match accessory identifiers to your intended HomePods. HA verifies identities and permissions on import.")
+    bundle = {
+        "controllers": select_records(extracted["controllers"], "Controller identities", "iOSPairingId", 3, prompt),
+        "accessories": select_records(extracted["accessories"], "Paired accessories", "AccessoryPairingID", 64, prompt),
+    }
     content = (json.dumps(bundle, indent=2) + "\n").encode()
     if len(content) > 131072:
         raise WizardError("Selected export exceeds HA's import limit.")
@@ -268,8 +376,19 @@ def export_credentials(directory, state):
         stream.write(content)
         stream.flush()
         os.fsync(stream.fileno())
-    save_state(directory, {**state, "phase": "complete"})
-    print("Selected credential bundle saved privately to: " + name)
+    path = Path(name)
+    if private_read(path) != content:
+        raise WizardError("The generated JSON could not be verified; the temporary key dump was retained.")
+    state = {
+        **state,
+        "phase": "complete",
+        "export_file": path.name,
+        "export_sha256": hashlib.sha256(content).hexdigest(),
+        "dump_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    save_state(directory, state)
+    sync_directory(directory)
+    return completed_export(directory, state)
 
 
 def main():
@@ -287,6 +406,7 @@ def main():
             "restore",
             "check-restored",
             "export",
+            "result",
         ),
     )
     parser.add_argument("directory", type=Path)
@@ -294,7 +414,9 @@ def main():
     try:
         directory = private_directory(args.directory)
         if args.action == "status":
-            print(load_state(directory)["phase"] if (directory / STATE_FILE).exists() else "new")
+            state = load_state(directory) if (directory / STATE_FILE).exists() else {"phase": "new"}
+            # Earlier wizard versions completed without recording an output path.
+            print("restore" if state["phase"] == "complete" and "export_file" not in state else state["phase"])
         elif args.action == "initial":
             check_initial()
         elif args.action == "snapshot":
@@ -322,6 +444,8 @@ def main():
                 if not sys.stdin.isatty() or not sys.stdout.isatty():
                     raise WizardError("Enter credentials interactively in Terminal; do not pipe or record input.")
                 export_credentials(directory, state)
+            elif args.action == "result":
+                completed_export(directory, state)
     except WizardError as error:
         print(str(error))
         return 1
