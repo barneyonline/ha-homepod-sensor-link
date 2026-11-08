@@ -41,6 +41,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._committed = False
         self._force_validate = False
         self._imported: Data | None = None
+        self._import_owner: str | None = None
+        self._discovery_hosts: list[str] = []
         self._selected: list[str] = []
         self._new_keys: list[str] = []
 
@@ -49,6 +51,10 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not user:
             return None
         await setup_ui(self.hass)
+        if self._import_owner is not None and self._import_owner != user.id:
+            self._imported = None
+            self._import_owner = None
+            self._discovery_hosts = []
         self._owner = user.id
         self._vault = await get_vault(self.hass)
         return user
@@ -96,14 +102,18 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
-        return self.async_show_menu(step_id="reconfigure", menu_options=["devices", "manage"])
+        return self.async_show_menu(step_id="reconfigure", menu_options=["devices", "credentials", "manage"])
 
     async def async_step_devices(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
         errors = {}
         try:
-            self._discovered = await discover_devices(self.hass)
+            self._discovered = (
+                await discover_devices(self.hass, hosts=self._discovery_hosts)
+                if self._discovery_hosts
+                else await discover_devices(self.hass)
+            )
         except Exception:
             self._discovered = {}
             errors["base"] = "discovery_failed"
@@ -146,9 +156,10 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             needs_import = any(
                 k in self._recovery_ids or "native_entry_id" not in self._discovered[k] for k in self._selected
             )
-            if needs_import:
+            if needs_import and self._imported is None:
                 return await self.async_step_credentials()
-            self._imported = {"controllers": [], "accessories": {}}
+            if self._imported is None:
+                self._imported = {"controllers": [], "accessories": {}}
             return await self._begin()
         return self.async_show_form(
             step_id="policy",
@@ -168,6 +179,10 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._imported = imports.consume(self.flow_id, self._owner)
             if self._imported is not None:
+                self._import_owner = self._owner
+                self._discovery_hosts = self._imported.get("discovery_hosts", [])
+                if not self._force_validate and (self._discovery_hosts or not self._selected):
+                    return await self.async_step_devices()
                 return await self._begin()
         nonce = imports.grant(self.flow_id, self._owner)
         url = "/homepod-sensor-link-import#" + urlencode({"flow": self.flow_id, "nonce": nonce})
