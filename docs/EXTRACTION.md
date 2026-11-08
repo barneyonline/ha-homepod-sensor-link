@@ -1,38 +1,64 @@
-# Explicit controller-key extraction guide
+# Controller-key extraction
 
-## Status and boundary
+**Status:** source-reviewed candidate; real-backup and HomePod verification remain outstanding. This integration does not extract credentials automatically.
 
-This is a **candidate workflow awaiting separately authorised real-backup and device verification**. The integration can parse the documented CSV/textual record shape and validate generated fixtures; that does not prove current HomeKit records are present/exportable from every iOS backup. Do not advertise a supported combination until it is tested.
+## Choose your route
 
-A Mac prerequisite is accepted for the initial guide. HA itself may run on Home Assistant OS elsewhere; the HA import needs no SSH, shell commands or manual storage-file editing. This integration never extracts a keychain implicitly.
+| Starting point | Route |
+|---|---|
+| iPhone/iPad | Create an encrypted backup, then export selected records on a Mac running macOS 14+. |
+| Existing authorised macOS export | Check its fields below, then import into HA. |
+| Mac only, without an export | No verified direct extraction procedure; see the macOS-only boundary. |
 
-Apple documents HomeKit identity keys in encrypted keychain backups. HomeKit home-database backup behaviour is a separate subject. [Apple communication security](https://support.apple.com/en-ge/guide/security/sec3a881ccb1/web), [Apple home data](https://support.apple.com/en-ca/guide/security/sec49613249e/web).
+You need a trusted administrator controller identity. A HomeKit QR/setup code cannot replace it; HA verifies administrator permission.
 
-## Candidate graphical route
+## iOS: create an encrypted backup
 
-The source-reviewed candidate is [iPhone Backup Explorer V1.4.4](https://github.com/dripster82/IphoneBackupExplorer/releases/tag/V1.4.4), requiring macOS 14+. The author documents local reading of known-password encrypted backups and selected-record export. Its additional viewers/exporters have limited device/iOS testing; this project has not installed or executed it against a real backup. [Author README](https://github.com/dripster82/IphoneBackupExplorer).
+1. Open **Home** on your iPhone/iPad and confirm access to the intended HomePods.
+2. Connect it to your Mac by cable. Unlock it and complete the normal **Trust** prompt if shown.
+3. In **Finder**, select the device → **General**. Choose to back up all device data to this Mac.
+4. Enable **Encrypt local backup**, retain its password, and select **Back Up Now**. An existing encrypted backup needs its existing password.
+5. After completion, open **Manage Backups** and check the timestamp and lock icon.
 
-1. Use your own authorised, encrypted local iPhone backup and its known password. Keep the backup on your own protected machine. Do not upload the full backup or disclose its password to this integration.
-2. Open the backup in the graphical application. Open **Passwords**, then **Options → Show system items**.
-3. Search for `com.apple.hap.pairing`. Select only the identity and accessory records required for the intended HomePods.
-4. Choose **Export Selected** and save the CSV locally. Do not export unrelated password groups or all keychain records.
-5. In HA’s guided setup, open the local import page and choose that CSV. The integration derives controller public keys, validates key pairs and trusted pins, then performs bounded read-only matching to the selected HomePods before allowing provisioning.
-6. After successful setup, remove unnecessary local export copies through your approved local process. Backups still contain secrets. Never attach exports to issues, diagnostics, screenshots or chat.
+Continue on the Mac. This procedure needs a local encrypted backup, not an iCloud backup. [Apple backup steps](https://support.apple.com/en-us/108796), [encryption guidance](https://support.apple.com/en-ie/108353).
 
-### Required record shape
+## macOS: export from the iOS backup
 
-- Identity `Account` → controller `iOSPairingId`.
-- Identity `Password` → printable hexadecimal `iOSDeviceLTPK` followed by `iOSDeviceLTSK` (128 characters total).
-- Accessory `Account` → exact `AccessoryPairingID`, including original spelling.
-- Accessory `Password` → hexadecimal `AccessoryLTPK` (64 characters).
-- `App / Group` must be `com.apple.hap.pairing`.
+The reviewed application is [iPhone Backup Explorer V1.4.4](https://github.com/dripster82/IphoneBackupExplorer/releases/tag/V1.4.4), requiring macOS 14+. It reads the backup, not the Mac's own keychain.
 
-These mappings come from the [KeychainKit author’s record documentation](https://github.com/pseudorandomuser/KeychainKit#extract-information-from-dump). Different accessories can use different controller identities. The HA flow must authenticate and verify administrator permission; a structurally valid export alone proves neither.
+1. Obtain the linked author release. Keep normal macOS security checks enabled; stop if opening it requires a bypass.
+2. Use **Open Backup Folder…** or **Choose Backups Folder…** to select the backup. Use the folder picker instead of broad Full Disk Access.
+3. Select the encrypted backup and enter its password in the application, never in HA.
+4. Open **Passwords → Options → Show system items**. Search for `com.apple.hap.pairing` and expand **System Items** if needed.
+5. Select only the matching **HomeKit Pairing Identity** and **Paired HomeKit Accessory** rows for your selected HomePods.
+6. Choose **Export → Export Selected** and save the CSV locally. Do not export unrelated passwords or whole sections.
 
-The GUI’s [keychain reader](https://github.com/dripster82/IphoneBackupExplorer/blob/V1.4.4/Sources/Services/KeychainStore.swift) handles textual secrets but replaces non-printable binary payloads with an “N bytes (binary)” placeholder. Such a placeholder has lost the key and is rejected by this integration. Missing records, unsupported backup formats and non-textual current HomeKit payloads are unresolved compatibility boundaries—not reasons to guess keys or claim extraction succeeded.
+[Folder-picker instructions](https://github.com/dripster82/IphoneBackupExplorer/blob/V1.4.4/README.md#full-disk-access) · [Selection/export controls](https://github.com/dripster82/IphoneBackupExplorer/blob/V1.4.4/Sources/Views/KeychainListView.swift).
 
-## Excluded procedures
+### macOS-only boundary
 
-The known KeychainKit extraction procedure requires disabling SIP/AMFI and includes manual HA storage editing. Those steps conflict with this project’s security constraints and are not part of this guide. Apple’s generic Keychain Access export and ordinary HomeKit consent do not establish access to protected HAP Generic Password records. Do not disable OS protections, bypass certificate checks, jailbreak a device or modify native HA credential storage to complete onboarding.
+Direct extraction of the Mac's protected HomeKit identity is **not verified**. [Keychain Access cannot export passwords](https://support.apple.com/en-az/guide/keychain-access/kyca35961/mac), and ordinary HomeKit consent does not expose private controller keys.
 
-If this candidate cannot export the required records intact, stop and report only application/OS versions, record counts and a controlled error code. Finding a different authorised, protection-preserving extraction route is a real prerequisite; the integration cannot manufacture an existing trusted administrator identity from a setup code or discovery advertisement.
+The published [KeychainKit procedure](https://github.com/pseudorandomuser/KeychainKit#disable-system-protections) requires disabling SIP/AMFI and includes manual HA-storage edits; those steps are excluded. Use an existing authorised export or the iOS-backup route. Otherwise stop; do not disable protections or jailbreak a device.
+
+## Check the exported fields
+
+CSV headers must include `Account`, `Password` and `App / Group`. Each row's group must be `com.apple.hap.pairing`.
+
+| Record | Account | Password |
+|---|---|---|
+| Controller identity | `iOSPairingId` | 128 hexadecimal characters: public key followed by the 64-character private seed, without a separator |
+| Paired accessory | `AccessoryPairingID` | 64-character public key (`AccessoryLTPK`) |
+
+For JSON/manual entry, provide `iOSPairingId`, `iOSDeviceLTSK` (private seed), `AccessoryPairingID` and `AccessoryLTPK`. Optional `iOSDeviceLTPK` must match the derived public key. These protocol field names also apply to macOS exports. Keep identifiers exactly as exported. [Accepted JSON format](SETUP.md#accepted-credential-formats), [field reference](https://github.com/pseudorandomuser/KeychainKit#extract-information-from-dump).
+
+**Stop if records are missing, blank or show `N bytes (binary)`.** The [reader](https://github.com/dripster82/IphoneBackupExplorer/blob/V1.4.4/Sources/Services/KeychainStore.swift) substitutes that placeholder for non-text secrets; it is not a key. Do not guess identities or substitute public keys for private seeds.
+
+## Import into Home Assistant
+
+1. Add **HomePod Sensor Link**, or use **Reconfigure → Add/import**. Select your HomePods.
+2. From a **local HA administrator session**, open the supplied import link. Upload the selected CSV/accepted JSON, or expand **Or enter controller credentials**.
+3. Return to setup and continue. HA checks identities, key pairs, pins and permissions. Confirm fresh temperature/humidity readings; follow [setup and retry guidance](SETUP.md) if incomplete.
+4. Remove unnecessary export copies after successful setup. Keep backups protected. Never share keys, exports, backups, identifiers or unreviewed logs.
+
+If blocked, report only application/OS versions, record counts and the integration's controlled error code.
