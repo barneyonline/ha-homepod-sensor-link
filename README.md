@@ -60,6 +60,7 @@ Credential import requires a local HA administrator. HTTP import is accepted but
 
 - New devices use a dedicated User controller; existing native HomeKit sensor entities and history remain unchanged.
 - Recovery is optional per device and requires verified administrator credentials. Network/discovery failures never authorise pairing changes.
+- Use **Reconfigure → Manage existing devices** to choose a HomePod, open its action menu and review an action before submitting it. The menu offers enable or disable recovery according to that HomePod’s current setting. Removal requires an explicit confirmation.
 - Removing a device deletes its owned credentials and recovery history. It does not revoke on-device pairings or delete native HomeKit entries/history.
 - No legacy `homepod_recovery` transition or storage migration is provided.
 

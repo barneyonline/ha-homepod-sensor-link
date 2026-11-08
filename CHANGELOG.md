@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Choose a HomePod before opening its native action menu, with descriptions, a recovery action matching its current setting and a review step before changes. Require explicit confirmation before deleting local credentials and recovery history.
+
 - Clarify the confirmation shown after adding HomePods to an existing setup.
 - Replace the empty HomePod selector with a clear message, local discovery guidance and options to search again or import a pairing export. Show a separate message when discovery fails.
 - Allow a corrected pairing export after an empty or failed search without restarting setup; searching again keeps the existing import.
