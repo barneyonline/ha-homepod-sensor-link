@@ -16,6 +16,7 @@
 <p align="center">
   <a href="#get-started">Install</a> ·
   <a href="#key-features">Features</a> ·
+  <a href="#at-a-glance">Screenshots</a> ·
   <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki">Documentation</a> ·
   <a href="https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md">Contribute</a>
 </p>
@@ -31,6 +32,25 @@
 - **Connection monitoring:** fresh authenticated checks, sensor freshness, diagnostics and administrator-access audits.
 - **Optional recovery:** on by default per device, with pinned identities, pairing-preservation checks and persisted repair limits.
 - **Device management and privacy:** resume partial setup, retry or cancel work, and automatically remove owned credentials and recovery history when a device is removed.
+
+## At a glance
+
+Temperature, humidity and sensor connection health, alongside options to add, import and manage HomePods.
+
+<!-- Inline images wrap onto separate rows on narrow screens. Keep their natural proportions. -->
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/homepod-sensors-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/homepod-sensors-light.png">
+    <img src="docs/images/homepod-sensors-light.png" alt="HomePod sensors: humidity, temperature and a Healthy sensor access diagnostic" width="320" align="top">
+  </picture>
+  &nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/homepod-management-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/homepod-management-light.png">
+    <img src="docs/images/homepod-management-light.png" alt="HomePod Sensor Link configuration: add or import devices, import a pairing export to find missing devices, and manage existing devices" width="440" align="top">
+  </picture>
+</p>
 
 ## Get started
 
