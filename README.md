@@ -37,11 +37,10 @@
 <!-- ha-marketplace:exclude-start -->
 [![Open HomePod Sensor Link in Home Assistant Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=barneyonline&repository=ha-homepod-sensor-link&category=integration)
 
-1. Read the [credential prerequisite and extraction guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction). A controller key needs its controller ID and accessory public-key pin; a HomeKit setup code is insufficient.
-   For direct macOS extraction, a reviewed repository checkout includes a [guided Terminal wizard](scripts/macos_homekit_wizard.sh) and the [helper's complete Swift source](scripts/macos_homekit/HomeKitExport.swift). Run `bash scripts/macos_homekit_wizard.sh` on an Apple silicon Mac with Xcode or its Command Line Tools, Python 3.9+ and a valid Apple Development certificate, then rerun after each reboot. The helper builds locally against Apple frameworks without fetching other packages. After verifying restoration, the wizard reads the private dump and creates JSON automatically: choose records by menu number when needed, with no key values to copy or type. It removes the temporary key dump only after verifying the saved JSON. After HA setup succeeds, delete the JSON or move it to secure encrypted storage. SIP/AMFI changes and restarts remain manual; `--restore` shows the saved restoration instructions. Keep `~/HomePodSensorLink-Export` private. Actual signing, extraction and HomePod access still require real-device verification.
-2. On **HA 2026.11+**, use the button above, or open **Settings → Marketplace → Add from link** and enter `https://github.com/barneyonline/ha-homepod-sensor-link`. Connect GitHub when prompted and add it as an **Integration**.
-3. Open **HomePod Sensor Link**, select **Install**, review the [latest release](https://github.com/barneyonline/ha-homepod-sensor-link/releases/latest), and confirm. Follow any restart prompt. Choose a tagged release; `main`/default-branch versions are development builds.
-4. Continue the setup prompt, or open **Settings → Devices & services → Add integration → HomePod Sensor Link**. Select your devices and recovery policy, then choose **Paste a CSV or JSON export** or **Enter controller credentials** in the standard Home Assistant setup dialog. Open an export in a text editor to copy its contents; file upload is not required.
+1. Follow the [credential extraction guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction) to prepare your controller credentials. The guide covers the [macOS wizard](scripts/macos_homekit_wizard.sh), automatic JSON export and security restoration.
+2. On **HA 2026.11+**, use the button above or add `https://github.com/barneyonline/ha-homepod-sensor-link` via **Settings → Marketplace → Add from link**. Connect GitHub if prompted and choose **Integration**.
+3. Open **HomePod Sensor Link**, select **Install**, choose a [tagged release](https://github.com/barneyonline/ha-homepod-sensor-link/releases/latest) and restart if prompted.
+4. Continue setup or open **Settings → Devices & services → Add integration → HomePod Sensor Link**. Paste your CSV/JSON export or enter controller credentials, then select devices and a recovery policy.
 
 See the [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) for detailed installation steps and [HA’s Marketplace instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories) for adding custom repositories.
 <!-- ha-marketplace:exclude-end -->
@@ -50,7 +49,7 @@ Requires **Home Assistant 2026.11.0+** (Python **3.14+**).
 
 See the [Wiki](https://github.com/barneyonline/ha-homepod-sensor-link/wiki) for [setup](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started), [using the integration](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Using-the-Integration), [automation examples](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Automation-Examples) and [troubleshooting](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Troubleshooting-and-Support).
 
-Credential import requires a local HA administrator. HTTP import is accepted but does not encrypt keys in transit. Never share controller keys, exports or HA storage in issues. [Security guidance](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Security).
+Credential import requires a local HA administrator. Never share controller keys, exports or HA storage in issues. [Security guidance](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Security).
 
 <details>
 <summary>Setup, recovery and removal details</summary>
