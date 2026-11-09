@@ -41,6 +41,54 @@ def dump_fixture(*, controllers=1, accessories=1):
 
 
 class WizardTests(unittest.TestCase):
+    def test_private_reads_reject_a_fifo_without_waiting_for_a_writer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "synthetic-fifo"
+            os.mkfifo(path, 0o600)
+            original_open = os.open
+
+            def nonblocking_open(path, flags):
+                self.assertTrue(flags & os.O_NONBLOCK)
+                return original_open(path, flags)
+
+            with patch.object(wizard.os, "open", side_effect=nonblocking_open), self.assertRaises(wizard.WizardError):
+                wizard.private_read(path)
+
+    def test_private_reads_reject_growth_beyond_the_limit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "synthetic-file"
+            wizard.private_write(path.parent, path.name, b"small")
+            original_fstat = os.fstat
+
+            def grow_after_stat(descriptor):
+                info = original_fstat(descriptor)
+                with path.open("ab") as stream:
+                    stream.write(b" beyond the limit")
+                return info
+
+            with patch.object(wizard.os, "fstat", side_effect=grow_after_stat), self.assertRaises(wizard.WizardError):
+                wizard.private_read(path, limit=5)
+
+    def test_snapshot_requires_directory_sync_after_saving_original_settings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve()
+            expected = saved_state()
+
+            def sync_saved_snapshot(location):
+                self.assertEqual(location, directory)
+                self.assertEqual(wizard.load_state(location), expected)
+                raise OSError("synthetic directory sync failure")
+
+            with (
+                patch.object(wizard, "check_initial"),
+                patch.object(wizard, "boot_arguments", return_value=(None, b"")),
+                patch.object(wizard, "sync_directory", side_effect=sync_saved_snapshot) as sync,
+                self.assertRaises(OSError),
+            ):
+                wizard.snapshot(directory)
+            sync.assert_called_once_with(directory)
+            self.assertEqual(wizard.load_state(directory), expected)
+
     def test_prepared_tool_must_remain_in_its_private_source_tree(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -366,7 +414,7 @@ class WizardTests(unittest.TestCase):
             )
 
     def test_failed_write_state_save_or_readback_keeps_the_original_dump(self):
-        for failure in ("write", "state", "readback"):
+        for failure in ("write", "state", "directory", "readback"):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
                 directory = wizard.private_directory(Path(temporary).resolve() / "private")
                 _, dump = dump_fixture()
@@ -380,6 +428,9 @@ class WizardTests(unittest.TestCase):
                 targets = {
                     "write": patch.object(wizard.os, "fsync", side_effect=OSError("synthetic write failure")),
                     "state": patch.object(wizard, "save_state", side_effect=OSError("synthetic state failure")),
+                    "directory": patch.object(
+                        wizard, "sync_directory", side_effect=OSError("synthetic directory sync failure")
+                    ),
                     "readback": patch.object(wizard, "private_read", side_effect=readback),
                 }
                 with (

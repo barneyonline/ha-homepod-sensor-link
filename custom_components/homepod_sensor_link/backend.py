@@ -154,6 +154,11 @@ class HomeKitBackend:
             primary_error = sys.exception()
             try:
                 await pairing.shutdown()
+                # aiohomekit suppresses CancelledError while draining its
+                # connector, including cancellation of this enclosing task.
+                # Finish closing first, then preserve the caller's cancellation.
+                if cast(asyncio.Task[None], asyncio.current_task()).cancelling():
+                    raise asyncio.CancelledError
             except Exception:
                 transport = pairing.connection.transport
                 if transport is not None:
