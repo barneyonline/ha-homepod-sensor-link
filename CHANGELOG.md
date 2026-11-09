@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### ✨ New features
 
-- None
+- Import irestore v0.4.0 `keychain.json` directly through the existing credential form on macOS or Windows. Decode typed text/Base64 HAP attributes, preserve complete controller/accessory keys and identifiers, and discard deleted records and unrelated credentials. Allow bounded 2 MiB irestore dumps while retaining existing normalized limits, validation and device selection. Verified with synthetic fixtures only; real backups and HomePods remain untested.
 
 ### 🐛 Bug fixes
 
