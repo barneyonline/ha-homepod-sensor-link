@@ -10,6 +10,28 @@ All notable changes to this project will be documented in this file.
 
 ### ✨ New features
 
+- None
+
+### 🐛 Bug fixes
+
+- None
+
+### 🔧 Improvements
+
+- None
+
+### 🔄 Other changes
+
+- None
+
+## v1.0.0 - 2026-11-09
+
+### 🚧 Breaking changes
+
+- None
+
+### ✨ New features
+
 - Import irestore v0.4.0 `keychain.json` directly through the existing credential form on macOS or Windows. Decode typed text/Base64 HAP attributes, preserve complete controller/accessory keys and identifiers, and discard deleted records and unrelated credentials. Allow bounded 2 MiB irestore dumps while retaining existing normalized limits, validation and device selection. Verified with synthetic fixtures only; real backups and HomePods remain untested.
 
 ### 🐛 Bug fixes
@@ -25,7 +47,9 @@ All notable changes to this project will be documented in this file.
 
 ### 🔄 Other changes
 
-- None
+- Set the integration manifest and project version to `1.0.0`.
+- Mark the project active and add theme-aware sensor and device-management screenshots to the README.
+- Add repository agent guidance and simplify the README setup instructions.
 
 ## v0.2.0 - 2026-11-08
 
