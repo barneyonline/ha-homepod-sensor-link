@@ -47,7 +47,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🔄 Other changes
 
-- Bump the integration manifest and project version to `1.0.0`.
+- Set the integration manifest and project version to `1.0.0`.
 - Mark the project active and add theme-aware sensor and device-management screenshots to the README.
 - Add repository agent guidance and simplify the README setup instructions.
 
