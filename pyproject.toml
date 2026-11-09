@@ -1,6 +1,6 @@
 [project]
 name = "ha-homepod-sensor-link"
-version = "0.2.0"
+version = "1.0.0"
 requires-python = ">=3.14"
 dependencies = []
 
