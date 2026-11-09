@@ -6,6 +6,28 @@ All notable changes to this project will be documented in this file.
 
 ### 🚧 Breaking changes
 
+- None
+
+### ✨ New features
+
+- None
+
+### 🐛 Bug fixes
+
+- None
+
+### 🔧 Improvements
+
+- None
+
+### 🔄 Other changes
+
+- None
+
+## v1.0.1 - 2026-11-10
+
+### 🚧 Breaking changes
+
 - Remove adoption, credential access, authentication, pairing recovery and reloads for native Home Assistant `homekit_controller` entries. Every sensor connection now uses an integration-owned regular User controller. Upgrade configuration entries to version 3: existing dedicated connections retain their identities, entities and safety counters; previously adopted devices pause until an administrator explicitly confirms separate connections and imports an independently obtained export. Their native entries, pairings and history remain untouched. New temperature/humidity entities are created only after confirmation; automatic recovery starts disabled for these transitions.
 - Replace native reload diagnostics with owned sensor publication diagnostics. Declare the aiohomekit dependency directly instead of loading `homekit_controller`.
 
@@ -23,7 +45,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🔄 Other changes
 
-- None
+- Set the integration manifest and project version to `1.0.1`.
 
 ## v1.0.0 - 2026-11-09
 
