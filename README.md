@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/barneyonline/ha-homepod-sensor-link/releases/latest"><img src="https://img.shields.io/github/v/release/barneyonline/ha-homepod-sensor-link" alt="Latest release"></a>
-  <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations"><img src="https://img.shields.io/badge/status-experimental-orange" alt="Experimental release"></a>
+  <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations"><img src="https://img.shields.io/badge/status-active-brightgreen" alt="Active"></a>
   <a href="https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"><img src="https://img.shields.io/badge/Home_Assistant-2026.11%2B-41BDF5?logo=homeassistant&amp;logoColor=white" alt="Home Assistant 2026.11 or newer"></a>
   <a href="#get-started"><img src="https://img.shields.io/badge/install-HA_Marketplace-41BDF5" alt="Install through Home Assistant Marketplace"></a>
 </p>
@@ -21,7 +21,7 @@
 </p>
 
 > [!IMPORTANT]
-> HomePod Sensor Link is an independent community project with no affiliation to Apple. **Experimental:** controller-key extraction, device setup and pairing recovery still require real-device verification. Review the [known limitations](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations) before installing. No HACS listing is claimed.
+> HomePod Sensor Link is an independent community project with no affiliation to Apple. Review the [known limitations](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations) before installing. No HACS listing is claimed.
 
 ## Key features
 
@@ -78,7 +78,7 @@ python3 scripts/package.py --output /tmp/homepod-sensor-link-local.zip
 
 Automated tests run on HA **2026.11.0** with aiohomekit **4.0.1**. Validation requires **100% Python statements/branches per integration module**, **100% JavaScript lines/branches/functions**, strict typing, hassfest, Ruff and repository/wiki checks. Codecov reports the Python integration coverage; JavaScript is gated separately.
 
-See [contributing](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md), [development](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Development-Environment), [validation evidence](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/validate.yml) and the [Platinum engineering target](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md#quality-checks). A target is not an awarded Home Assistant quality tier; extraction and real-device verification remain outstanding.
+See [contributing](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md), [development](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Development-Environment), [validation evidence](https://github.com/barneyonline/ha-homepod-sensor-link/actions/workflows/validate.yml) and the [Platinum engineering target](https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/CONTRIBUTING.md#quality-checks). A target is not an awarded Home Assistant quality tier.
 
 </details>
 
