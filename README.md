@@ -28,9 +28,9 @@
 
 - **Climate sensors:** temperature and humidity from one or more selected HomePods.
 - **Friendly device names:** use uniquely matched AirPlay names during discovery and integration reloads. Manual names stay in place; unavailable or ambiguous matches keep the current name.
-- **Guided setup:** discover devices, import authorised controller credentials, or adopt existing native HomeKit sensors without changing their entities or history.
+- **Guided setup:** discover HomePods and import authorised controller credentials to create dedicated sensor connections.
 - **Connection monitoring:** fresh authenticated checks, sensor freshness, diagnostics and administrator-access audits.
-- **Optional recovery:** on by default per device, with pinned identities, pairing-preservation checks and persisted repair limits.
+- **Optional recovery:** on by default for newly added HomePods; initially off for devices transitioned from native HomeKit adoption. Recovery uses pinned identities, pairing-preservation checks and persisted repair limits.
 - **Device management and privacy:** resume partial setup, retry or cancel work, and automatically remove owned credentials and recovery history when a device is removed.
 
 ## At a glance
@@ -51,6 +51,25 @@ Temperature, humidity and sensor connection health, alongside options to add, im
     <img src="docs/images/homepod-management-light.png" alt="HomePod Sensor Link configuration: add or import devices, import a pairing export to find missing devices, and manage existing devices" width="440" align="top">
   </picture>
 </p>
+
+## Upgrading to v1.0.1
+
+v1.0.1 uses integration-owned controllers for all HomePod Sensor Link connections. What you need to do depends on how your HomePods were connected:
+
+- **Already using dedicated HomePod Sensor Link controllers:** your controller identities, sensor entities, history and recovery settings are retained. No adopted-device transition is needed.
+- **Previously adopted from native HomeKit Device entries:** HomePod Sensor Link pauses those devices and shows **Separate connection required**. Reconnecting requires your explicit confirmation and a fresh, independently obtained administrator credential import to create separate integration-owned controllers and new temperature/humidity entities.
+
+For previously adopted devices, the upgrade removes cached native-controller data, identity pins and imported administrator credentials from HomePod Sensor Link's own storage. Existing dedicated connections keep their stored credentials and identity pins.
+
+To reconnect a paused, previously adopted device:
+
+1. From a local Home Assistant administrator session, open **Settings → Devices & services → HomePod Sensor Link → Reconfigure → Create separate connections for previously adopted devices**.
+2. Select the paused HomePods, confirm that you want separate sensor connections, then import a fresh authorised controller export obtained independently from Apple Home. Include each accessory's identifier and public key; do not copy Home Assistant's native HomeKit credential storage.
+3. Complete setup and check the new HomePod Sensor Link sensor entities. These new entities do not inherit native sensor history or automatically replace the native entities in dashboards or automations; update those references explicitly if wanted. **Automatic recovery starts disabled for transitioned devices**; enable it separately after setup if wanted.
+
+Native HomeKit entries, pairings, sensor entities and their history remain untouched. This transition does not transfer their history or repair a native pairing. You can leave a device under native HomeKit management by removing only its paused HomePod Sensor Link record through **Reconfigure → Manage existing devices**.
+
+This transition is covered by offline tests; live HomePod verification remains outstanding.
 
 ## Get started
 
@@ -78,7 +97,7 @@ Credential import requires a local HA administrator. Never share controller keys
 - Setup actively browses for sensor services for five seconds, then resolves their current endpoints. A HomePod that does not advertise its sensor service may remain absent even when its AirPlay player is visible.
 - If no HomePods are available to add, setup explains local discovery requirements and offers **Search again** or **Import pairing export**. Search again keeps your current import; Import pairing export lets you replace it with corrected address hints. HomePods already managed by this integration are hidden. A failed search is reported separately so you can check connectivity and retry.
 
-- New devices use a dedicated User controller; existing native HomeKit sensor entities and history remain unchanged.
+- Sensor connections use integration-owned regular User controllers; native HomeKit entries, pairings, sensor entities and history remain unchanged.
 - Recovery is optional per device and requires verified administrator credentials. Network/discovery failures never authorise pairing changes.
 - Use **Reconfigure → Manage existing devices** to choose a HomePod, open its action menu and review an action before submitting it. The menu offers enable or disable recovery according to that HomePod’s current setting. Removal requires an explicit confirmation.
 - Removing a device deletes its owned credentials and recovery history. It does not revoke on-device pairings or delete native HomeKit entries/history.
