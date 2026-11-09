@@ -49,7 +49,7 @@
       },
       "credential_export": {
         "title": "Paste credential export",
-        "description": "Open your selected HAP CSV or JSON export in a text editor and paste its contents below. Only include the required HomeKit records (maximum 128 KiB). The text is visible while you edit it. Raw exports stay in memory and are not saved as uploaded files. Address hints in pairing JSON trigger fresh discovery; review the discovered devices before continuing setup.",
+        "description": "Open your selected HAP CSV/JSON export (maximum 128 KiB), or an irestore v0.4.0 keychain.json export (maximum 2 MiB), in a text editor and paste its contents below. From irestore dumps, only non-deleted com.apple.hap.pairing records in General are imported; other credentials are discarded. The text is visible while you edit it. Raw exports stay in memory and are not saved as uploaded files. Address hints in pairing JSON trigger fresh discovery; review the discovered devices before continuing setup.",
         "data": {
           "credential_export": "CSV or JSON export"
         }
@@ -131,7 +131,7 @@
       "select_devices": "Select one or more discovered or retained devices.",
       "safety_blocked": "Identity or permission validation blocked this device. Investigate the mismatch; Resume cannot replace its pinned identity.",
       "device_action_failed": "The device action did not complete. Local state was kept or cleanup remains pending. Check protected storage and connectivity before retrying.",
-      "invalid_credential_export": "The credentials could not be read. Check the CSV/JSON format, controller identifier and private key, and accessory identifier/public key. Include both accessory fields or leave both empty. Exports must be at most 128 KiB. Enter the credentials again to retry.",
+      "invalid_credential_export": "The credentials could not be read. Check the CSV/JSON format, controller identifier and private key, and accessory identifier/public key. Include both accessory fields or leave both empty. Selected HAP exports must be at most 128 KiB; irestore keychain JSON must be at most 2 MiB (UTF-8). Enter the credentials again to retry.",
       "confirm_removal": "Confirm that you want to delete this HomePod’s local credentials and recovery history."
     },
     "abort": {

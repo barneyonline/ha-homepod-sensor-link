@@ -5,6 +5,7 @@ from typing import Any
 from .models import Data
 
 
+import base64
 import csv
 import io
 import json
@@ -14,6 +15,10 @@ from .credentials import _public
 from .engine import SafetyFailure
 
 MAX_IMPORT = 131072
+# HA 2026.11.0 http/server.py permits 16 MiB requests; TextSelector has no
+# length cap. Leave room for the JSON envelope and worst-case 6x escaping.
+# Only irestore dumps get this allowance; normalized formats retain MAX_IMPORT.
+MAX_RAW_IMPORT = 2 * 1024 * 1024
 CONTROLLER_FIELDS = {"iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK"}
 PAIRING_FIELDS = CONTROLLER_FIELDS | {"AccessoryPairingID", "AccessoryLTPK"}
 TRANSPORT_FIELDS = {"AccessoryIP", "AccessoryIPs", "AccessoryPort", "Connection"}
@@ -49,106 +54,185 @@ def _identifier(value: str) -> str:
     return value
 
 
-def parse_export(content: bytes | str) -> Data:
-    """Supported typed JSON or selected HAP rows from iPhone Backup Explorer CSV."""
-    try:
-        if len(content) > MAX_IMPORT:
+def _irestore_fields(record: Data) -> dict[str, str]:
+    """Map the parallel metadata emitted by irestore v0.4.0 parseRecord."""
+    order, types = record["_fieldOrder"], record["_fieldTypes"]
+    if not isinstance(order, str) or not isinstance(types, str):
+        raise ValueError
+    names, kinds = order.split(","), types.split(",")
+    if (
+        len(names) != len(kinds)
+        or len(set(names)) != len(names)
+        or any(not name or name.startswith("_") for name in names)
+        or any(not kind for kind in kinds)
+        or set(names) != {name for name in record if not name.startswith("_")}
+    ):
+        raise ValueError
+    return dict(zip(names, kinds, strict=True))
+
+
+def _irestore_bytes(record: Data, fields: dict[str, str], name: str) -> bytes:
+    """Decode exactly the declared Go type, never infer an encoding from text."""
+    value = record[name]
+    if not isinstance(value, str):
+        raise ValueError
+    if fields[name] == "string":
+        return value.encode("utf-8")
+    if fields[name] == "[]uint8":
+        return base64.b64decode(value, validate=True)
+    raise ValueError
+
+
+def _irestore_records(data: Data) -> tuple[list[Data], list[Data]]:
+    """Discard other categories/groups before reading any account or key data."""
+    records = data["General"]
+    if not isinstance(records, list):
+        raise ValueError
+    controllers: list[Data] = []
+    accessories: list[Data] = []
+    for record in records:
+        if not isinstance(record, dict):
             raise ValueError
-        text = content.decode("utf-8-sig") if isinstance(content, bytes) else content
-        controllers, accessories = [], []
-        hosts: dict[str, None] = {}
-        if text.lstrip().startswith("{"):
-
-            def pairs(items: list[tuple[str, Any]]) -> Data:
-                result = {}
-                for key, value in items:
-                    if key in result:
-                        raise ValueError
-                    result[key] = value
-                return result
-
-            data = json.loads(text, object_pairs_hook=pairs)
-            if "iOSDeviceLTSK" in data:
-                controllers = [{k: data[k] for k in ("iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK") if k in data}]
-                if "AccessoryPairingID" in data:
-                    accessories = [{k: data[k] for k in ("AccessoryPairingID", "AccessoryLTPK")}]
-                if set(data) - {
-                    "iOSPairingId",
-                    "iOSDeviceLTSK",
-                    "iOSDeviceLTPK",
-                    "AccessoryPairingID",
-                    "AccessoryLTPK",
-                }:
-                    raise ValueError
-            elif set(data) == {"controllers", "accessories"}:
-                controllers, accessories = data["controllers"], data["accessories"]
-            else:
-                # aiohomekit exports are keyed by accessory ID. Endpoints are
-                # historical metadata. Addresses only prompt fresh DNS-SD;
-                # exported ports and identities never authorise connections.
-                if not 1 <= len(data) <= 64:
-                    raise ValueError
-                for identifier, record in data.items():
-                    if (
-                        not isinstance(record, dict)
-                        or set(record) - (PAIRING_FIELDS | TRANSPORT_FIELDS)
-                        or identifier.lower() != record["AccessoryPairingID"].lower()
-                    ):
-                        raise ValueError
-                    controllers.append({k: record[k] for k in CONTROLLER_FIELDS if k in record})
-                    accessories.append({k: record[k] for k in ("AccessoryPairingID", "AccessoryLTPK")})
-                    hosts.update(dict.fromkeys(discovery_hosts(record)))
+        fields = _irestore_fields(record)
+        if "agrp" not in fields or _irestore_bytes(record, fields, "agrp") != b"com.apple.hap.pairing":
+            continue
+        if "tomb" in fields:
+            if fields["tomb"] != "int64" or type(record["tomb"]) is not int or record["tomb"] not in (0, 1):
+                raise ValueError
+            if record["tomb"] == 1:
+                continue
+        identifier = _irestore_bytes(record, fields, "acct").decode("utf-8")
+        value = _irestore_bytes(record, fields, "v_Data")
+        if len(value) == 64:
+            controllers.append(
+                {"iOSPairingId": identifier, "iOSDeviceLTPK": value[:32].hex(), "iOSDeviceLTSK": value[32:].hex()}
+            )
+        elif len(value) == 32:
+            accessories.append({"AccessoryPairingID": identifier, "AccessoryLTPK": value.hex()})
         else:
-            reader = csv.DictReader(io.StringIO(text))
-            if not {"Account", "Password", "App / Group"} <= set(reader.fieldnames or []):
-                raise ValueError
-            for row in reader:
-                if row["App / Group"] != "com.apple.hap.pairing":
-                    raise ValueError
-                value, identifier = row["Password"], row["Account"]
-                if len(value) == 128:
-                    controllers.append(
-                        {"iOSPairingId": identifier, "iOSDeviceLTPK": value[:64], "iOSDeviceLTSK": value[64:]}
-                    )
-                elif len(value) == 64:
-                    accessories.append({"AccessoryPairingID": identifier, "AccessoryLTPK": value})
-                else:
-                    raise ValueError
-        if (
-            not isinstance(controllers, list)
-            or not isinstance(accessories, list)
-            or not 1 <= len(controllers) <= 64
-            or len(accessories) > 64
-        ):
             raise ValueError
-        identities: dict[str, Data] = {}
-        pins: dict[str, str] = {}
-        raw_ids: dict[str, str] = {}
-        for source in controllers:
-            if set(source) - {"iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK"}:
-                raise ValueError
-            identifier = _identifier(source["iOSPairingId"])
-            secret = _hex(source["iOSDeviceLTSK"], 64)
-            public = _public(secret)
-            if "iOSDeviceLTPK" in source and _hex(source["iOSDeviceLTPK"], 64) != public:
-                raise ValueError
-            value = {"iOSPairingId": identifier, "iOSDeviceLTSK": secret, "iOSDeviceLTPK": public}
-            if identifier in identities and identities[identifier] != value:
-                raise ValueError
-            identities[identifier] = value
-        for accessory in accessories:
-            if set(accessory) != {"AccessoryPairingID", "AccessoryLTPK"}:
-                raise ValueError
-            raw = _identifier(accessory["AccessoryPairingID"])
-            identifier = raw.lower()
-            public = _hex(accessory["AccessoryLTPK"], 64)
-            if identifier in pins and (pins[identifier] != public or raw_ids[identifier] != raw):
-                raise ValueError
-            pins[identifier] = public
-            raw_ids[identifier] = raw
-        result = {"controllers": list(identities.values()), "accessories": pins, "accessory_identifiers": raw_ids}
-        if hosts:
-            result["discovery_hosts"] = list(hosts)[:64]
-        return result
+    return controllers, accessories
+
+
+def parse_export(content: bytes | str) -> Data:
+    """Return normalized HAP credentials or an error carrying no decoder context."""
+    try:
+        return _parse_export(content)
     except Exception:
-        raise SafetyFailure("invalid_credential_export") from None
+        pass
+    # Do not attach JSONDecodeError.doc, decoder tracebacks or the dump to the
+    # outward exception. The only frame exposed here has no raw input left.
+    content = b""
+    raise SafetyFailure("invalid_credential_export")
+
+
+def _parse_export(content: bytes | str) -> Data:
+    """Parse typed/aiohomekit JSON, selected HAP CSV, or native irestore JSON."""
+    if len(content) > MAX_RAW_IMPORT:
+        raise ValueError
+    size = len(content) if isinstance(content, bytes) else len(content.encode("utf-8"))
+    if size > MAX_RAW_IMPORT:
+        raise ValueError
+    text = content.decode("utf-8-sig") if isinstance(content, bytes) else content
+    controllers: list[Data] = []
+    accessories: list[Data] = []
+    hosts: dict[str, None] = {}
+    if text.lstrip().startswith("{"):
+
+        def pairs(items: list[tuple[str, Any]]) -> Data:
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ValueError
+                result[key] = value
+            return result
+
+        data = json.loads(text, object_pairs_hook=pairs)
+        if "General" in data:
+            controllers, accessories = _irestore_records(data)
+        elif size > MAX_IMPORT:
+            raise ValueError
+        elif "iOSDeviceLTSK" in data:
+            controllers = [{k: data[k] for k in ("iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK") if k in data}]
+            if "AccessoryPairingID" in data:
+                accessories = [{k: data[k] for k in ("AccessoryPairingID", "AccessoryLTPK")}]
+            if set(data) - {
+                "iOSPairingId",
+                "iOSDeviceLTSK",
+                "iOSDeviceLTPK",
+                "AccessoryPairingID",
+                "AccessoryLTPK",
+            }:
+                raise ValueError
+        elif set(data) == {"controllers", "accessories"}:
+            controllers, accessories = data["controllers"], data["accessories"]
+        else:
+            # aiohomekit exports are keyed by accessory ID. Endpoints are
+            # historical metadata. Addresses only prompt fresh DNS-SD;
+            # exported ports and identities never authorise connections.
+            if not 1 <= len(data) <= 64:
+                raise ValueError
+            for identifier, record in data.items():
+                if (
+                    not isinstance(record, dict)
+                    or set(record) - (PAIRING_FIELDS | TRANSPORT_FIELDS)
+                    or identifier.lower() != record["AccessoryPairingID"].lower()
+                ):
+                    raise ValueError
+                controllers.append({k: record[k] for k in CONTROLLER_FIELDS if k in record})
+                accessories.append({k: record[k] for k in ("AccessoryPairingID", "AccessoryLTPK")})
+                hosts.update(dict.fromkeys(discovery_hosts(record)))
+    else:
+        if size > MAX_IMPORT:
+            raise ValueError
+        reader = csv.DictReader(io.StringIO(text))
+        if not {"Account", "Password", "App / Group"} <= set(reader.fieldnames or []):
+            raise ValueError
+        for row in reader:
+            if row["App / Group"] != "com.apple.hap.pairing":
+                raise ValueError
+            value, identifier = row["Password"], row["Account"]
+            if len(value) == 128:
+                controllers.append(
+                    {"iOSPairingId": identifier, "iOSDeviceLTPK": value[:64], "iOSDeviceLTSK": value[64:]}
+                )
+            elif len(value) == 64:
+                accessories.append({"AccessoryPairingID": identifier, "AccessoryLTPK": value})
+            else:
+                raise ValueError
+    if (
+        not isinstance(controllers, list)
+        or not isinstance(accessories, list)
+        or not 1 <= len(controllers) <= 64
+        or len(accessories) > 64
+    ):
+        raise ValueError
+    identities: dict[str, Data] = {}
+    pins: dict[str, str] = {}
+    raw_ids: dict[str, str] = {}
+    for source in controllers:
+        if set(source) - {"iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK"}:
+            raise ValueError
+        identifier = _identifier(source["iOSPairingId"])
+        secret = _hex(source["iOSDeviceLTSK"], 64)
+        public = _public(secret)
+        if "iOSDeviceLTPK" in source and _hex(source["iOSDeviceLTPK"], 64) != public:
+            raise ValueError
+        value = {"iOSPairingId": identifier, "iOSDeviceLTSK": secret, "iOSDeviceLTPK": public}
+        if identifier in identities and identities[identifier] != value:
+            raise ValueError
+        identities[identifier] = value
+    for accessory in accessories:
+        if set(accessory) != {"AccessoryPairingID", "AccessoryLTPK"}:
+            raise ValueError
+        raw = _identifier(accessory["AccessoryPairingID"])
+        identifier = raw.lower()
+        public = _hex(accessory["AccessoryLTPK"], 64)
+        if identifier in pins and (pins[identifier] != public or raw_ids[identifier] != raw):
+            raise ValueError
+        pins[identifier] = public
+        raw_ids[identifier] = raw
+    result = {"controllers": list(identities.values()), "accessories": pins, "accessory_identifiers": raw_ids}
+    if hosts:
+        result["discovery_hosts"] = list(hosts)[:64]
+    return result

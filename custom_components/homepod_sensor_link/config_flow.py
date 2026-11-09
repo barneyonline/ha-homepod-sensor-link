@@ -215,7 +215,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             try:
-                self._imported = parse_export(user_input.get("credential_export", "").encode("utf-8"))
+                self._imported = parse_export(user_input.pop("credential_export", "").encode("utf-8"))
             except (SafetyFailure, UnicodeError):
                 errors["base"] = "invalid_credential_export"
             else:
