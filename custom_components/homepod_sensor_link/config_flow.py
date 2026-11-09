@@ -47,7 +47,6 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._imported: Data | None = None
         self._discovery_hosts: list[str] = []
         self._selected: list[str] = []
-        self._new_keys: list[str] = []
         self._managed_device: str | None = None
 
     async def _access(self) -> User | None:
@@ -302,7 +301,6 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 for identifier in self._selected:
                     try:
                         async with asyncio.timeout(120):
-                            before = set(self._vault.records())
                             keys = await prepare(
                                 self.hass,
                                 self._vault,
@@ -315,7 +313,6 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 force_validate=self._force_validate,
                             )
                             results.extend(keys)
-                            self._new_keys.extend(k for k in keys if k not in before)
                     except Exception:
                         # Keep a visible, resumable per-device failure while
                         # preserving every successful device and existing pin.
@@ -348,8 +345,6 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         key = record["target"]["entry_id"]
                         await self._vault.put(key, record)
                         results.append(key)
-                        if previous is None:
-                            self._new_keys.append(key)
             return results
         except Exception:
             return results

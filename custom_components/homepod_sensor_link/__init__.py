@@ -19,7 +19,7 @@ from .models import Data
 from .onboarding import refresh_names
 from .credentials import DOMAIN, public_targets
 from .engine import SafetyFailure
-from .vault import get_vault, Vault, VaultStates
+from .vault import get_vault, Vault
 from .coordinator import (
     Runtime as Runtime,
     OWNER as OWNER,
@@ -172,10 +172,6 @@ async def async_remove_config_entry_device(
             return False
         vault = await get_vault(hass)
         await vault.remove(keys[0])
-        store = VaultStates(vault)
-        states = await store.async_load() or {}
-        states.pop(keys[0], None)
-        await store.async_save(states)
         hass.config_entries.async_update_entry(
             entry,
             data={

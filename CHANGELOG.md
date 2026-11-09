@@ -14,11 +14,14 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug fixes
 
-- None
+- Preserve task cancellation when aiohomekit suppresses it during connector shutdown, after closing the HAP transport.
+- Keep device removal retryable when protected credential deletion fails or is interrupted; remove credentials before discarding live device state.
+- Durably save the macOS wizard's original-settings snapshot and phase changes before continuing. Reject FIFO inputs without blocking and files that grow beyond the private-read size limit.
 
 ### 🔧 Improvements
 
-- None
+- Remove unused setup bookkeeping and its redundant full-inventory copies. Delete credentials and recovery history in one atomic commit when removing a device, avoiding a second unchanged journal write.
+- Resolve HAP and AirPlay browser inventories with at most 32 concurrent workers per browser, retaining all results and draining workers on cancellation or failure.
 
 ### 🔄 Other changes
 

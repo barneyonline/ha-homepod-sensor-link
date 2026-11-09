@@ -107,7 +107,6 @@ class Runtime:
         self.store: VaultStates | Store[Snapshot] = (
             VaultStates(vault) if vault else Store(hass, 1, DOMAIN + ".state", private=True, atomic_writes=True)
         )
-        self.recovery = any(t.get("recovery", entry.data.get("automatic_recovery", True)) for t in targets)
         self.notifications: dict[str, tuple[Any, ...]] = {}
         self.readings: dict[str, tuple[datetime, Readings]] = {}
         self.entities: dict[str, dict[str, str]] = {}
@@ -483,6 +482,9 @@ class Runtime:
         async with self.engine.lock:
             if key not in self.records:
                 return
+            # Keep the configured device retryable if protected-file removal
+            # fails. Only forget live state after its credentials are deleted.
+            await cast(Vault, self.vault).remove(key)
             self.records.pop(key)
             self.engine.states.pop(key, None)
             self.readings.pop(key, None)
@@ -493,9 +495,7 @@ class Runtime:
             for suffix in (key, key + "_recovered", "access_" + key):
                 persistent_notification.async_dismiss(self.hass, "homepod_sensor_link_" + suffix)
             self.sync_targets()
-            await cast(Vault, self.vault).remove(key)
             self.saved.pop(key, None)
-            await self.store.async_save(deepcopy(self.saved))
             self.hass.config_entries.async_update_entry(
                 self.entry,
                 data={

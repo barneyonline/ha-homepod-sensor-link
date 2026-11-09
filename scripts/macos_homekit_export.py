@@ -38,7 +38,7 @@ def private_directory(directory):
 
 
 def private_read(path, limit=131072):
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as stream:
         info = os.fstat(stream.fileno())
         if (
@@ -49,7 +49,10 @@ def private_read(path, limit=131072):
             or info.st_size > limit
         ):
             raise WizardError("A wizard file has unsafe permissions, type or size.")
-        return stream.read(limit + 1)
+        content = stream.read(limit + 1)
+        if len(content) > limit:
+            raise WizardError("A wizard file exceeds the supported size.")
+        return content
 
 
 def private_write(directory, name, content):
@@ -60,6 +63,7 @@ def private_write(directory, name, content):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, directory / name)
+        sync_directory(directory)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -387,7 +391,6 @@ def export_credentials(directory, state, prompt=None):
         "dump_sha256": hashlib.sha256(raw).hexdigest(),
     }
     save_state(directory, state)
-    sync_directory(directory)
     return completed_export(directory, state)
 
 
