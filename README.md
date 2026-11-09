@@ -52,25 +52,6 @@ Temperature, humidity and sensor connection health, alongside options to add, im
   </picture>
 </p>
 
-## Upgrading to v1.0.1
-
-v1.0.1 uses integration-owned controllers for all HomePod Sensor Link connections. What you need to do depends on how your HomePods were connected:
-
-- **Already using dedicated HomePod Sensor Link controllers:** your controller identities, sensor entities, history and recovery settings are retained. No adopted-device transition is needed.
-- **Previously adopted from native HomeKit Device entries:** HomePod Sensor Link pauses those devices and shows **Separate connection required**. Reconnecting requires your explicit confirmation and a fresh, independently obtained administrator credential import to create separate integration-owned controllers and new temperature/humidity entities.
-
-For previously adopted devices, the upgrade removes cached native-controller data, identity pins and imported administrator credentials from HomePod Sensor Link's own storage. Existing dedicated connections keep their stored credentials and identity pins.
-
-To reconnect a paused, previously adopted device:
-
-1. From a local Home Assistant administrator session, open **Settings → Devices & services → HomePod Sensor Link → Reconfigure → Create separate connections for previously adopted devices**.
-2. Select the paused HomePods, confirm that you want separate sensor connections, then import a fresh authorised controller export obtained independently from Apple Home. Include each accessory's identifier and public key; do not copy Home Assistant's native HomeKit credential storage.
-3. Complete setup and check the new HomePod Sensor Link sensor entities. These new entities do not inherit native sensor history or automatically replace the native entities in dashboards or automations; update those references explicitly if wanted. **Automatic recovery starts disabled for transitioned devices**; enable it separately after setup if wanted.
-
-Native HomeKit entries, pairings, sensor entities and their history remain untouched. This transition does not transfer their history or repair a native pairing. You can leave a device under native HomeKit management by removing only its paused HomePod Sensor Link record through **Reconfigure → Manage existing devices**.
-
-This transition is covered by offline tests; live HomePod verification remains outstanding.
-
 ## Get started
 
 <!-- ha-marketplace:exclude-start -->
