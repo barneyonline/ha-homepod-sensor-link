@@ -12,7 +12,6 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from .credentials import pinned_target
 from .engine import AuthenticationFailure, SafetyFailure, RecoveryPaused
 
 BOOT = "homepod_sensor_link.boot"
@@ -58,37 +57,33 @@ async def prepare(
     *,
     flow_id: str | None = None,
     force_validate: bool = False,
+    transition_confirmed: bool = False,
 ) -> list[str]:
     """Only read-only probes here. Commit each device independently before writes."""
     results = []
     existing = {r["target"]["accessory_id"].lower(): r for r in vault.records().values()}
-    native = {
-        str(e.data.get("AccessoryPairingID", "")).lower(): e
-        for e in hass.config_entries.async_entries("homekit_controller")
-        if e.disabled_by is None
-    }
     for identifier in selected:
         previous = existing.get(identifier)
+        transitioning = previous is not None and previous["phase"] == "transition_required"
+        if transitioning and not transition_confirmed:
+            raise SafetyFailure("explicit_transition_required")
         if (
             previous
+            and not transitioning
             and not force_validate
             and previous["phase"] != "needs_credentials"
             and not (identifier in recovery_ids and "source" not in previous["target"])
         ):
             results.append(previous["target"]["entry_id"])
             continue
-        entry = native.get(identifier)
         if previous and "ha_key" in previous["target"]:
             target = previous["target"]
-        elif entry is not None:
-            target = pinned_target(entry)
-            target["ha_permissions"] = 1
         else:
             public = imported.get("accessories", {}).get(identifier)
             if not public:
                 raise SafetyFailure("accessory_pin_required")
             raw_id = imported.get("accessory_identifiers", {}).get(identifier, identifier)
-            target = make_owned(raw_id, public, discovered[identifier]["endpoint"])
+            target = make_owned(raw_id, public, discovered[identifier].get("endpoint", {}))
         if previous and "ha_key" not in previous["target"]:
             target["entry_id"] = previous["target"]["entry_id"]
         target["recovery"] = identifier in recovery_ids
@@ -101,45 +96,33 @@ async def prepare(
             "error": None,
             "flow_id": flow_id,
         }
-        # A native entry can be monitored without an administrator credential.
-        if not target.get("owned"):
+        target.pop("source", None)
+        source = None
+        for candidate in imported.get("controllers", [])[:3]:
+            if candidate["iOSPairingId"] == target["ha_id"]:
+                continue
+            trial = {**target, "source": candidate}
             try:
-                await backend.read_ha(target)
-            except AuthenticationFailure:
-                # A missing native pairing may be recovered only by the normal
-                # failure/grace/rate-limited engine after admin validation.
-                record["error"] = "native_authentication_pending"
-        needs_source = target.get("owned") or target["recovery"]
-        if needs_source:
-            target.pop("source", None)
-            source = None
-            for candidate in imported.get("controllers", [])[:3]:
-                if candidate["iOSPairingId"] == target["ha_id"]:
-                    continue
-                trial = {**target, "source": candidate}
-                try:
-                    await backend.inspect_recovery(trial)
-                    await backend.read_ha(trial, source=True)
-                except SafetyFailure:
-                    continue
-                # Network/read failures deliberately stop matching; they do not
-                # justify trying every identity or permitting a pairing write.
-                if (
-                    previous
-                    and previous.get("source_pin")
-                    and previous["source_pin"] != {k: v for k, v in candidate.items() if k != "iOSDeviceLTSK"}
-                ):
-                    raise SafetyFailure("recovery_identity_changed")
-                source = candidate
-                break
-            if source is None:
-                record["error"] = "administrator_not_matched"
-                record["phase"] = "needs_credentials"
-            else:
-                target["source"] = deepcopy(source)
-                record["source_pin"] = {k: v for k, v in source.items() if k != "iOSDeviceLTSK"}
-        if not target.get("owned") and (not needs_source or "source" in target):
-            record["phase"] = "verified"
+                await backend.inspect_recovery(trial)
+                await backend.read_ha(trial, source=True)
+            except SafetyFailure:
+                continue
+            # Network/read failures deliberately stop matching; they do not
+            # justify trying every identity or permitting a pairing write.
+            if (
+                previous
+                and previous.get("source_pin")
+                and previous["source_pin"] != {k: v for k, v in candidate.items() if k != "iOSDeviceLTSK"}
+            ):
+                raise SafetyFailure("recovery_identity_changed")
+            source = candidate
+            break
+        if source is None:
+            record["error"] = "administrator_not_matched"
+            record["phase"] = "needs_credentials"
+        else:
+            target["source"] = deepcopy(source)
+            record["source_pin"] = {k: v for k, v in source.items() if k != "iOSDeviceLTSK"}
         if previous and (previous.get("commissioned") or previous["phase"] == "active") and "source" in target:
             record["commissioned"] = True
             record["phase"] = "verified"
@@ -162,7 +145,7 @@ class Provisioner:
         if resume:
             record["cancelled"] = False
         target = record["target"]
-        if not target.get("owned") or record["phase"] in ("needs_credentials", "blocked"):
+        if record["phase"] in ("needs_credentials", "blocked", "transition_required"):
             return record, None
         # Following restart, only a fresh read with the existing dedicated key
         # is automatic. Any further pairing write needs explicit Resume.

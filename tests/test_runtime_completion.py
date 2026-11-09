@@ -12,7 +12,6 @@ from custom_components.homepod_sensor_link import coordinator
 from custom_components.homepod_sensor_link.credentials import DOMAIN
 from custom_components.homepod_sensor_link.engine import SafetyFailure
 import test_onboarding_v2 as fixtures
-from test_recovery import fixture
 from test_boundary_failures import native_config
 
 
@@ -31,7 +30,7 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(runtime.records[self.key]["phase"], "verified")
             self.assertIn("source", runtime.records[self.key]["target"])
             with self.assertRaises(OSError):
-                await runtime.verify_native(self.target)
+                await runtime.verify_publication(self.target)
             await runtime.read_target(self.target)
             with (
                 patch.object(runtime.engine, "check_all", AsyncMock()),
@@ -82,37 +81,6 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaises(asyncio.CancelledError):
                         await pending
                 self.assertEqual(runtime.pending_tasks, {})
-            await runtime.stop()
-
-    async def test_native_reload_uses_real_registry_ids_and_waits_for_new_reports(self):
-        config, runtime = await self.make_runtime()
-        target, original = fixture()
-        native = native_config(original.data)
-        self.hass.config_entries._entries[native.entry_id] = native
-        target["entry_id"] = native.entry_id
-        registry = er.async_get(self.hass)
-        for kind in ("temperature", "humidity"):
-            registry.async_get_or_create(
-                "sensor", "homekit_controller", "native_" + kind, config_entry=native, original_device_class=kind
-            )
-        ids = runtime.native_sensor_ids(target)
-        try:
-            with patch.object(self.hass.config_entries, "async_reload", AsyncMock(return_value=False)):
-                with self.assertRaises(OSError):
-                    await runtime.reload_entry(target)
-
-            async def sample(_seconds):
-                for entity_id in ids:
-                    self.hass.states.async_set(entity_id, "21")
-
-            with (
-                patch.object(self.hass.config_entries, "async_reload", AsyncMock(return_value=True)),
-                patch.object(coordinator.asyncio, "sleep", sample),
-                patch.object(runtime, "verify_native", AsyncMock()) as verify,
-            ):
-                await runtime.reload_entry(target)
-                verify.assert_awaited_once_with(target)
-        finally:
             await runtime.stop()
 
     async def test_remove_registry_preserves_foreign_associations_and_entities(self):

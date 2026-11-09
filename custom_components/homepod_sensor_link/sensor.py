@@ -22,19 +22,23 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: HomePodConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     runtime = entry.runtime_data
-    known: set[str] = set()
+    known: set[tuple[str, str]] = set()
 
     @callback
     def add_devices() -> None:
         entities: list[DeviceSensor] = []
-        known.intersection_update(target["entry_id"] for target in runtime.targets)
+        keys = {target["entry_id"] for target in runtime.targets}
+        known.intersection_update((key, kind) for key, kind in known if key in keys)
         for target in runtime.targets:
-            if target["entry_id"] in known:
-                continue
-            known.add(target["entry_id"])
-            entities.append(RecoveryStatus(runtime, target))
-            if target.get("owned"):
-                entities.extend(Measurement(runtime, target, kind) for kind in ("temperature", "humidity"))
+            key = target["entry_id"]
+            if (key, "status") not in known:
+                known.add((key, "status"))
+                entities.append(RecoveryStatus(runtime, target))
+            if "pairing" in target:
+                for kind in ("temperature", "humidity"):
+                    if (key, kind) not in known:
+                        known.add((key, kind))
+                        entities.append(Measurement(runtime, target, kind))
         if entities:
             async_add_entities(entities)
 
@@ -97,11 +101,12 @@ class RecoveryStatus(DeviceSensor):
         "cooldown",
         "repairing",
         "repair_failed",
-        "native_reload_pending",
-        "native_unavailable",
+        "publication_pending",
+        "publication_unavailable",
         "paused",
         "prepared",
         "needs_credentials",
+        "transition_required",
         "write_uncertain",
         "accepted",
         "verified",
@@ -144,8 +149,8 @@ class RecoveryStatus(DeviceSensor):
             "last_error_type": data.get("last_error_type"),
             "last_error_location": data.get("last_error_location"),
             "repair_attempts_24h": len(data.get("attempts", [])),
-            "native_reload_pending": data.get("native_pending", False),
-            "native_reload_attempts_1h": len(data.get("native_attempts", [])),
+            "publication_pending": data.get("publication_pending", False),
+            "publication_attempts_1h": len(data.get("publication_attempts", [])),
             "recovery_access_status": data.get("recovery_status", "not_checked"),
         }
 

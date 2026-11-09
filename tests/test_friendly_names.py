@@ -149,7 +149,7 @@ class NameDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             await names.discover_airplay(self.hass)
         browser.async_cancel.assert_awaited_once()
 
-    async def test_discovery_uses_fresh_addresses_and_preserves_native_adoption(self):
+    async def test_discovery_uses_fresh_addresses_without_native_adoption(self):
         native = native_config({"AccessoryPairingID": "one", "AccessoryIP": "192.0.2.99"})
         self.hass.config_entries._entries[native.entry_id] = native
         fresh = {"one": candidate(["192.0.2.1"]), "unmatched": candidate(["192.0.2.2"])}
@@ -164,7 +164,7 @@ class NameDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await onboarding.discover_devices(self.hass)
         self.assertEqual(result["one"]["name"], "Test Room")
-        self.assertEqual(result["one"]["native_entry_id"], native.entry_id)
+        self.assertNotIn("native_entry_id", result["one"])
         self.assertEqual(result["unmatched"]["name"], "HomePodSensor disposable")
 
     async def test_cached_sensor_address_cannot_persist_another_homepods_name(self):

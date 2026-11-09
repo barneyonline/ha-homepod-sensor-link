@@ -75,7 +75,7 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                                 start = len(reports)
                                 runtime.publish(target, {"temperature": 22, "humidity": 46})
                                 self.assertEqual(reports[start:], [target["entry_id"]] * 2)
-                                await runtime.verify_native(target)
+                                await runtime.verify_publication(target)
                             snapshot.assert_not_called()
                         self.assertEqual(len(reports), 2 * count)
                         # The final health/inventory broadcast is retained.
@@ -84,7 +84,7 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                         missing = runtime.entities[self.key]["humidity"]
                         self.hass.states.async_remove(missing)
                         with self.assertRaisesRegex(OSError, "sensor_reports_not_fresh"):
-                            await runtime.verify_native(self.target)
+                            await runtime.verify_publication(self.target)
                         await platform.async_reset()
                         self.assertEqual(runtime.measurement_listeners, {})
                         self.assertEqual(runtime.entities[self.key], {})
@@ -171,7 +171,7 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(platform.entities), 3)
                 self.assertEqual(len(runtime.measurement_listeners[self.key]), 2)
                 runtime.publish(self.target, {"temperature": 21, "humidity": 45})
-                await runtime.verify_native(self.target)
+                await runtime.verify_publication(self.target)
                 await runtime.remove_device(self.key)
                 await self.hass.async_block_till_done()
                 self.assertEqual(platform.entities, {})

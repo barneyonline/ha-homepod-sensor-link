@@ -9,10 +9,10 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers import entity_registry as er, device_registry as dr
+from homeassistant.helpers import device_registry as dr
 
 from custom_components.homepod_sensor_link import onboarding, ui, sensor
-from custom_components.homepod_sensor_link.credentials import pinned_target, validate_target
+from custom_components.homepod_sensor_link.credentials import validate_target
 from custom_components.homepod_sensor_link.engine import SafetyFailure
 from custom_components.homepod_sensor_link.importer import parse_export
 from custom_components.homepod_sensor_link.vault import DATA_FILE, _load, _write
@@ -87,61 +87,22 @@ class ExportBoundaryTests(unittest.TestCase):
 
     def test_native_and_source_identity_pins_reject_invalid_input(self):
         target, entry = fixture()
-        self.assertEqual(pinned_target(entry)["entry_id"], entry.entry_id)
-        for changed in (
-            None,
-            SimpleNamespace(data={}),
-            SimpleNamespace(**{**vars(entry), "entry_id": 42}),
-            SimpleNamespace(**{**vars(entry), "data": {**entry.data, "AccessoryLTPK": "ab"}}),
-        ):
-            with self.assertRaises(SafetyFailure):
-                pinned_target(changed)
         with self.assertRaises(SafetyFailure):
-            validate_target(target, entry, {"iOSPairingId": "changed"})
+            validate_target(target, {"iOSPairingId": "changed"})
         for source in (
             {**target["source"], "extra": True},
             {**target["source"], "iOSPairingId": target["ha_id"]},
             {**target["source"], "iOSDeviceLTPK": keypair()[1]},
         ):
             with self.assertRaises(SafetyFailure):
-                validate_target({**target, "source": source}, entry)
+                validate_target({**target, "source": source})
 
 
 class BoundaryLifecycleTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
 
-    async def test_native_inventory_filters_disabled_and_non_measurement_entities(self):
-        registry = er.async_get(self.hass)
-        config = fixtures.entry()
-        self.hass.config_entries._entries[config.entry_id] = config
-        for kind in ("temperature", "humidity"):
-            item = registry.async_get_or_create(
-                "sensor", "homekit_controller", kind, config_entry=config, original_device_class=kind
-            )
-            self.assertIsNotNone(item)
-        registry.async_get_or_create("switch", "homekit_controller", "power", config_entry=config)
-        registry.async_get_or_create(
-            "sensor", "homekit_controller", "battery", config_entry=config, original_device_class="battery"
-        )
-        disabled = registry.async_get_or_create(
-            "sensor",
-            "homekit_controller",
-            "ignored",
-            config_entry=config,
-            original_device_class="temperature",
-            disabled_by=er.RegistryEntryDisabler.USER,
-        )
-        self.assertEqual(len(onboarding.sensor_ids(self.hass, config.entry_id)), 2)
-        registry.async_update_entity(disabled.entity_id, disabled_by=None)
-        with self.assertRaises(SafetyFailure):
-            onboarding.sensor_ids(self.hass, config.entry_id)
-        registry.async_remove(disabled.entity_id)
-        registry.async_remove(next(e for e in onboarding.sensor_ids(self.hass, config.entry_id) if "humidity" in e))
-        with self.assertRaises(SafetyFailure):
-            onboarding.sensor_ids(self.hass, config.entry_id)
-
-    async def test_discovery_merges_native_entries(self):
+    async def test_discovery_never_merges_native_entries(self):
         native = native_config({"AccessoryPairingID": "native-only"})
         self.hass.config_entries._entries[native.entry_id] = native
         unrelated = native_config({"AccessoryPairingID": "unrelated"})
@@ -154,8 +115,7 @@ class BoundaryLifecycleTests(unittest.IsolatedAsyncioTestCase):
             onboarding, "_discover_candidates", AsyncMock(return_value={"discovered": {"name": "Candidate"}})
         ):
             result = await onboarding.discover_devices(self.hass)
-        self.assertEqual(set(result), {"discovered", "native-only"})
-        self.assertEqual(result["native-only"]["native_entry_id"], native.entry_id)
+        self.assertEqual(set(result), {"discovered"})
 
     async def test_discovery_controller_closes_on_success_failure_and_cancellation(self):
         controller = SimpleNamespace(async_start=AsyncMock(), async_stop=AsyncMock())

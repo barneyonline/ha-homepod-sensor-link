@@ -1,6 +1,6 @@
 check_now:
   name: Check sensor access now
-  description: Run the normal sensor access check now. Enabled recovery, pending setup and native reloads still require all persisted safeguards; this action does not bypass limits.
+  description: Run the normal sensor access check now. Enabled recovery, pending setup and sensor publication still require all persisted safeguards; this action does not bypass limits.
 check_recovery_access:
   name: Check recovery administrator access
   description: Read-only administrator audit for recovery-enabled devices. Returns anonymous health state without keys or pairing identifiers.

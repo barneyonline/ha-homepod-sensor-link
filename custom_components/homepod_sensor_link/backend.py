@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import cast
 from .models import Data, Target, Readings, PairingRow
-from homeassistant.config_entries import ConfigEntry
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from aiohomekit.controller.ip import IpController
 from zeroconf.asyncio import AsyncZeroconf
@@ -31,15 +30,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from .engine import AuthenticationFailure, SafetyFailure, RecoveryPaused, canonical
 
 
-def check_current(target: Target, entry: ConfigEntry | None) -> Data:
-    """Pin both identities. Never repair a replaced or deliberately removed entry."""
-    if target.get("owned"):
-        entry = type(
-            "OwnedPairing", (), {"domain": "homekit_controller", "disabled_by": None, "data": target["pairing"]}
-        )()
-    if entry is None or entry.domain != "homekit_controller" or entry.disabled_by is not None:
-        raise SafetyFailure("native_entry_changed")
-    data = dict(entry.data)
+def check_current(target: Target) -> Data:
+    """Accept only this integration's dedicated, pinned regular User identity."""
+    if target.get("owned") is not True or target.get("ha_permissions") != 0:
+        raise SafetyFailure("owned_controller_required")
+    data = dict(target.get("pairing", {}))
     if (
         data.get("Connection") != "IP"
         or str(data.get("AccessoryPairingID", "")).lower() != target["accessory_id"].lower()
@@ -47,7 +42,7 @@ def check_current(target: Target, entry: ConfigEntry | None) -> Data:
         or data.get("iOSPairingId") != target["ha_id"]
         or str(data.get("iOSDeviceLTPK", "")).lower() != target["ha_key"].lower()
     ):
-        raise SafetyFailure("native_identity_changed")
+        raise SafetyFailure("owned_identity_changed")
     try:
         public = (
             Ed25519PrivateKey.from_private_bytes(bytes.fromhex(data["iOSDeviceLTSK"]))
@@ -58,15 +53,13 @@ def check_current(target: Target, entry: ConfigEntry | None) -> Data:
         if public != target["ha_key"].lower():
             raise ValueError
     except Exception:
-        raise SafetyFailure("native_private_key_changed") from None
+        raise SafetyFailure("owned_private_key_changed") from None
     return data
 
 
 class HomeKitBackend:
-    def __init__(
-        self, controller: IpController, zeroconf: AsyncZeroconf, get_entry: Callable[[str], ConfigEntry | None]
-    ) -> None:
-        self.controller, self.zeroconf, self.get_entry = controller, zeroconf, get_entry
+    def __init__(self, controller: IpController, zeroconf: AsyncZeroconf) -> None:
+        self.controller, self.zeroconf = controller, zeroconf
         self.write_allowed: Callable[[], bool] = lambda: True
         self.before_write: Callable[[Target], Awaitable[None]] | None = None
         self.after_write: Callable[[Target], Awaitable[None]] | None = None
@@ -101,11 +94,9 @@ class HomeKitBackend:
                 if description.id.lower() != target["accessory_id"].lower():
                     raise SafetyFailure("advertised_identity_changed")
                 return self._endpoint(description.addresses, description.port)
-        # A new controller may miss cached PTR records while HA's existing native
-        # connection is working. Reuse HA's current endpoint in that case. HAP
-        # still verifies the pinned accessory ID and signature BEFORE sending the
-        # controller identity or permitting any pairing operation.
-        data = check_current(target, self.get_entry(target["entry_id"]))
+        # Only the integration's own saved endpoint is a fallback. Authentication
+        # still verifies the accessory's pinned identity before any pairing write.
+        data = check_current(target)
         addresses = data.get("AccessoryIPs") or [data.get("AccessoryIP")]
         return self._endpoint(addresses, data.get("AccessoryPort"))
 
@@ -126,7 +117,7 @@ class HomeKitBackend:
 
     @asynccontextmanager
     async def session(self, target: Target, source: bool = False) -> AsyncIterator[IpPairing]:
-        data = check_current(target, self.get_entry(target["entry_id"]))
+        data = check_current(target)
         data.update(await self.endpoint(target))
         if source:
             data.update(target["source"])
@@ -190,7 +181,7 @@ class HomeKitBackend:
                 for k in characteristics
             ):
                 raise OSError("sensor_read_failed")
-            if target.get("owned") and len(characteristics) != 2:
+            if len(characteristics) != 2:
                 raise SafetyFailure("ambiguous_sensor_layout")
             readings = {
                 "humidity" if kind == "10" else "temperature": values[key]["value"]
@@ -220,7 +211,7 @@ class HomeKitBackend:
                 if (
                     len(existing) != 1
                     or existing[0]["publicKey"].lower() != target["ha_key"].lower()
-                    or existing[0]["permissions"] != target.get("ha_permissions", 1)
+                    or existing[0]["permissions"] != target["ha_permissions"]
                 ):
                     raise SafetyFailure("ha_public_key_changed")
                 if target.get("expected_pairings"):
@@ -237,7 +228,7 @@ class HomeKitBackend:
                 {
                     "pairingId": target["ha_id"],
                     "publicKey": target["ha_key"].lower(),
-                    "permissions": target.get("ha_permissions", 1),
+                    "permissions": target["ha_permissions"],
                 }
             ]
             if self.before_write:
@@ -246,11 +237,11 @@ class HomeKitBackend:
             if not self.write_allowed():
                 raise RecoveryPaused()
             await cast(Callable[[str, str, str], Awaitable[None]], pairing.add_pairing)(
-                target["ha_id"], target["ha_key"], "User" if target.get("ha_permissions", 1) == 0 else "Admin"
+                target["ha_id"], target["ha_key"], "User"
             )
             after = await cast(Callable[[], Awaitable[list[PairingRow]]], pairing.list_pairings)()
             expected = canonical(before)
-            expected[(target["ha_id"], target["ha_key"].lower(), target.get("ha_permissions", 1))] += 1
+            expected[(target["ha_id"], target["ha_key"].lower(), target["ha_permissions"])] += 1
             if canonical(after) != expected:
                 raise SafetyFailure("existing_pairings_changed")
             await self.clear_expected(target)
@@ -273,7 +264,7 @@ class HomeKitBackend:
             if ha and (
                 len(ha) != 1
                 or ha[0]["publicKey"].lower() != target["ha_key"].lower()
-                or ha[0]["permissions"] != target.get("ha_permissions", 1)
+                or ha[0]["permissions"] != target["ha_permissions"]
             ):
                 raise SafetyFailure("ha_public_key_changed")
             return {

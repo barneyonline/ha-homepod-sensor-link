@@ -146,7 +146,7 @@ class RuntimeWatchdogTests(unittest.IsolatedAsyncioTestCase):
         self.config, self.runtime = await self.make_runtime()
         self.runtime.records[self.key]["phase"] = "active"
         self.runtime.sync_targets()
-        self.runtime.verify_native = AsyncMock()
+        self.runtime.verify_publication = AsyncMock()
         self.backend.read_ha.side_effect = None
         self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
         self.watchdog = self.runtime.watchdog

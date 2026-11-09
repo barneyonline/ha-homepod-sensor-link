@@ -6,7 +6,6 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "homekit_controller",
     "zeroconf",
     "http"
   ],
@@ -14,6 +13,9 @@
   "integration_type": "service",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/barneyonline/ha-homepod-sensor-link/issues",
+  "requirements": [
+    "aiohomekit>=4.0.1"
+  ],
   "single_config_entry": true,
   "version": "1.0.0",
   "zeroconf": [

@@ -304,7 +304,7 @@
       "docs": [
         "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
       ],
-      "comment": "HAP discovery offers HomePod candidates and native adoption without replacing trusted pins."
+      "comment": "HAP discovery offers public HomePod candidates for dedicated controllers without accessing native entries or replacing trusted pins."
     },
     "discovery-update-info": {
       "code": [

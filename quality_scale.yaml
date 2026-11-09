@@ -98,7 +98,7 @@ rules:
     comment: "Diagnostics return anonymous curated state, including a safe empty result without loaded runtime. Evidence: custom_components/homepod_sensor_link/diagnostics.py, custom_components/homepod_sensor_link/coordinator.py, tests/test_preflight.py, tests/test_onboarding_v2.py, SECURITY.md"
   discovery:
     status: done
-    comment: "HAP discovery offers HomePod candidates and native adoption without replacing trusted pins. Evidence: custom_components/homepod_sensor_link/onboarding.py, custom_components/homepod_sensor_link/manifest.json, tests/test_boundary_failures.py, https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
+    comment: "HAP discovery offers public HomePod candidates for dedicated controllers without accessing native entries or replacing trusted pins. Evidence: custom_components/homepod_sensor_link/onboarding.py, custom_components/homepod_sensor_link/manifest.json, tests/test_boundary_failures.py, https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started"
   discovery-update-info:
     status: done
     comment: "Every fresh session resolves current endpoints and checks the stable accessory pin before trusting the peer. Evidence: custom_components/homepod_sensor_link/backend.py, tests/test_backend_edges.py, https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Architecture"

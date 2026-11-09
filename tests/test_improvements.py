@@ -31,7 +31,7 @@ class NativeRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.notify,
             lambda: self.now,
             saved,
-            verify_native=self.verify,
+            verify_publication=self.verify,
         )
 
     async def poll(self, *times):
@@ -47,12 +47,12 @@ class NativeRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.reload.side_effect = [OSError(), None]
         await self.missing_pairing()
         state = self.engine.states["test"]
-        self.assertEqual(state.status, "native_reload_pending")
-        self.assertTrue(state.native_pending)
+        self.assertEqual(state.status, "publication_pending")
+        self.assertTrue(state.publication_pending)
         self.assertIsNone(state.last_verified)
         await self.poll(900)
         self.assertEqual(state.status, "healthy")
-        self.assertFalse(state.native_pending)
+        self.assertFalse(state.publication_pending)
         self.assertEqual(self.reload.await_count, 2)
         self.backend.restore_missing.assert_awaited_once()
         self.assertEqual(state.repairs, 1)
@@ -71,7 +71,7 @@ class NativeRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_unavailable_native_entities_are_not_healthy_despite_successful_probe(self):
         self.verify.side_effect = OSError()
         await self.poll(0, 300, 600, 900)
-        self.assertEqual(self.engine.states["test"].status, "native_reload_pending")
+        self.assertEqual(self.engine.states["test"].status, "publication_pending")
         self.assertIsNone(self.engine.states["test"].last_verified)
         self.assertEqual(self.reload.await_count, 3)
         self.backend.restore_missing.assert_not_called()
@@ -96,7 +96,7 @@ class NativeRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_successful_reload_does_not_clear_failed_native_verification(self):
         self.verify.side_effect = OSError()
         await self.missing_pairing()
-        self.assertTrue(self.engine.states["test"].native_pending)
+        self.assertTrue(self.engine.states["test"].publication_pending)
         self.assertEqual(self.engine.states["test"].repairs, 0)
         self.assertIsNone(self.engine.states["test"].last_verified)
 

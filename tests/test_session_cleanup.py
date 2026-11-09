@@ -19,7 +19,7 @@ class SessionCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.target, self.entry = fixture()
         self.entry.data.update(AccessoryIP="192.0.2.1", AccessoryPort=12345)
         self.controller = SimpleNamespace(_char_cache=CharacteristicCacheMemory())
-        self.backend = HomeKitBackend(self.controller, None, lambda _: self.entry)
+        self.backend = HomeKitBackend(self.controller, None)
         self.backend.endpoint = AsyncMock(return_value={"AccessoryIP": "192.0.2.1", "AccessoryPort": 12345})
 
     async def pairing_with_failed_connector(self, error):

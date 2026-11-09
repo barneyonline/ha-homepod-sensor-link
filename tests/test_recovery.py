@@ -53,7 +53,8 @@ def fixture(index=0):
         "iOSDeviceLTPK": public,
         "iOSDeviceLTSK": secret,
     }
-    entry = SimpleNamespace(entry_id=target["entry_id"], data=data, domain="homekit_controller", disabled_by=None)
+    target.update(owned=True, ha_permissions=0, pairing=data)
+    entry = SimpleNamespace(entry_id=target["entry_id"], data=data, domain="unused_foreign_fixture", disabled_by=None)
     return target, entry
 
 
@@ -169,7 +170,7 @@ class PairingPreservationTests(unittest.IsolatedAsyncioTestCase):
             list_pairings=AsyncMock(side_effect=lambda: copy.deepcopy(self.rows)),
             add_pairing=AsyncMock(side_effect=self.add),
         )
-        self.backend = HomeKitBackend(None, None, lambda _: self.entry)
+        self.backend = HomeKitBackend(None, None)
 
         @asynccontextmanager
         async def session(*_args, **_kwargs):
@@ -178,8 +179,8 @@ class PairingPreservationTests(unittest.IsolatedAsyncioTestCase):
         self.backend.session = session
 
     async def add(self, identifier, public_key, permission):
-        self.assertEqual((identifier, public_key, permission), (self.target["ha_id"], self.target["ha_key"], "Admin"))
-        self.rows.append({"pairingId": identifier, "publicKey": public_key, "permissions": 1})
+        self.assertEqual((identifier, public_key, permission), (self.target["ha_id"], self.target["ha_key"], "User"))
+        self.rows.append({"pairingId": identifier, "publicKey": public_key, "permissions": 0})
 
     async def test_only_known_missing_public_key_added_and_others_preserved(self):
         original = copy.deepcopy(self.rows)
@@ -188,7 +189,7 @@ class PairingPreservationTests(unittest.IsolatedAsyncioTestCase):
         self.pairing.add_pairing.assert_awaited_once()
 
     async def test_existing_matching_pairing_is_noop(self):
-        await self.add(self.target["ha_id"], self.target["ha_key"], "Admin")
+        await self.add(self.target["ha_id"], self.target["ha_key"], "User")
         self.assertFalse(await self.backend.restore_missing(self.target))
         self.pairing.add_pairing.assert_not_called()
 
@@ -199,7 +200,7 @@ class PairingPreservationTests(unittest.IsolatedAsyncioTestCase):
         self.pairing.add_pairing.assert_not_called()
 
     async def test_changed_ha_permissions_fail_closed_without_readding(self):
-        self.rows.append({"pairingId": self.target["ha_id"], "publicKey": self.target["ha_key"], "permissions": 0})
+        self.rows.append({"pairingId": self.target["ha_id"], "publicKey": self.target["ha_key"], "permissions": 1})
         with self.assertRaises(SafetyFailure):
             await self.backend.restore_missing(self.target)
         self.pairing.add_pairing.assert_not_called()
@@ -237,7 +238,7 @@ class CredentialTests(unittest.TestCase):
     def load(self):
         targets = read_private(self.file)["targets"]
         for target in targets:
-            validate_target(target, self.entries.get(target["entry_id"]))
+            validate_target(target)
         return targets
 
     def test_multiple_native_target_validation(self):
@@ -268,6 +269,7 @@ class CredentialTests(unittest.TestCase):
 
     def test_ha_private_public_mismatch_rejected(self):
         self.records[0][1].data["iOSDeviceLTSK"] = "ab" * 32
+        self.write()
         with self.assertRaises(SafetyFailure):
             self.load()
 
@@ -276,17 +278,16 @@ class CredentialTests(unittest.TestCase):
             with self.subTest(key=key):
                 original = self.records[0][1].data[key]
                 self.records[0][1].data[key] = "different"
+                self.write()
                 with self.assertRaises(SafetyFailure):
                     self.load()
                 self.records[0][1].data[key] = original
 
-    def test_disabled_or_removed_native_entry_blocked(self):
-        target, entry = self.records[0]
-        entry.disabled_by = "user"
-        with self.assertRaises(SafetyFailure):
-            check_current(target, entry)
-        with self.assertRaises(SafetyFailure):
-            check_current(target, None)
+    def test_unowned_and_administrator_targets_blocked(self):
+        target, _ = self.records[0]
+        for field, value in (("owned", False), ("ha_permissions", 1)):
+            with self.assertRaises(SafetyFailure):
+                check_current({**target, field: value})
 
 
 class EndpointTests(unittest.IsolatedAsyncioTestCase):
@@ -294,7 +295,7 @@ class EndpointTests(unittest.IsolatedAsyncioTestCase):
         self.target, self.entry = fixture()
         self.entry.data.update(AccessoryIP="192.0.2.18", AccessoryIPs=["192.0.2.18"], AccessoryPort=12345)
         self.controller = SimpleNamespace(async_find=AsyncMock(side_effect=AccessoryNotFoundError("missing PTR")))
-        self.backend = HomeKitBackend(self.controller, SimpleNamespace(zeroconf=object()), lambda _: self.entry)
+        self.backend = HomeKitBackend(self.controller, SimpleNamespace(zeroconf=object()))
 
     async def test_missing_ptr_uses_current_native_endpoint(self):
         endpoint = await self.backend.endpoint(self.target)

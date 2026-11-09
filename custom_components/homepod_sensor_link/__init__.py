@@ -14,6 +14,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.storage import Store
+from .migration import migrate_entry
 from .repairs import create_issue
 from .models import Data
 from .onboarding import refresh_names
@@ -62,8 +63,12 @@ async def async_setup(hass: HomeAssistant, config: Data) -> bool:
     return True
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: HomePodConfigEntry) -> bool:
+    return await migrate_entry(hass, entry)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: HomePodConfigEntry) -> bool:
-    if entry.version != 2:
+    if entry.version != 3:
         raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key="unsupported_configuration")
     if conflicting_recovery(hass) or OWNER in hass.data:
         create_issue(hass, "engine_conflict", "engine_conflict", entry.entry_id, ir.IssueSeverity.ERROR)
@@ -145,6 +150,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: HomePodConfigEntry) -> 
     ir.async_delete_issue(hass, DOMAIN, "checks_unavailable")
     ir.async_delete_issue(hass, DOMAIN, "engine_conflict")
     ir.async_delete_issue(hass, DOMAIN, "monitoring_stalled")
+    ir.async_delete_issue(hass, DOMAIN, "controller_transition")
     persistent_notification.async_dismiss(hass, DOMAIN + "_watchdog_" + entry.entry_id)
     for key in entry.data.get("device_keys", []):
         clear_device_issues(hass, key)
