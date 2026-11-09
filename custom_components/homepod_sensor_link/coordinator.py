@@ -31,10 +31,9 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.util import dt as dt_util
 
-from .backend import HomeKitBackend, check_current
+from .backend import HomeKitBackend
 from .audit import RecoveryAudit
 from .credentials import DOMAIN, validate_target
-from .onboarding import sensor_ids, verify_readings
 from .engine import INTERVAL, RecoveryEngine, SafetyFailure, AuthenticationFailure, DeviceState
 from .provisioning import Provisioner, boot_id
 from .vault import Vault, VaultStates
@@ -121,7 +120,7 @@ class Runtime:
             self.monitored_devices,
             lambda: not self.stopped and hass.state == CoreState.running and not conflicting_recovery(hass),
         )
-        self.backend = HomeKitBackend(controller, zeroconf_instance, hass.config_entries.async_get_entry)
+        self.backend = HomeKitBackend(controller, zeroconf_instance)
         self.coordinator = DataUpdateCoordinator(
             hass,
             _LOGGER,
@@ -158,12 +157,10 @@ class Runtime:
             ):
                 raise SafetyFailure("invalid_persisted_policy")
             target = record["target"]
-            if record["phase"] == "needs_credentials":
+            if record["phase"] in ("needs_credentials", "transition_required"):
                 continue
             try:
-                validate_target(
-                    target, self.hass.config_entries.async_get_entry(target["entry_id"]), record.get("source_pin")
-                )
+                validate_target(target, record.get("source_pin"))
                 if (
                     target.get("recovery", True)
                     and record["phase"] in ("active", "verified")
@@ -177,11 +174,11 @@ class Runtime:
             self.targets,
             Backend(self.backend.read_ha, self.backend.restore_missing),
             self.save_state,
-            self.reload_entry,
+            self.refresh_publication,
             self.notify,
             lambda: dt_util.utcnow().timestamp(),
             self.saved,
-            verify_native=self.verify_native,
+            verify_publication=self.verify_publication,
             automatic_recovery=True,
             is_active=lambda: not self.stopped and not conflicting_recovery(self.hass),
             check_completed=self.watchdog.completed,
@@ -216,12 +213,22 @@ class Runtime:
         return {
             key
             for key, record in self.records.items()
-            if record["phase"] not in ("needs_credentials", "blocked")
+            if record["phase"] not in ("needs_credentials", "blocked", "transition_required")
             and not record.get("cancelled")
             and not self.engine.states[key].blocked
         }
 
     def sync_targets(self) -> None:
+        if any(record["phase"] == "transition_required" for record in self.records.values()):
+            create_issue(
+                self.hass,
+                "controller_transition",
+                "controller_transition",
+                self.entry.entry_id,
+                ir.IssueSeverity.WARNING,
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, "controller_transition")
         self.targets = [r["target"] for r in self.records.values()]
         self.engine.targets = [
             r["target"]
@@ -239,11 +246,9 @@ class Runtime:
             records = cast(Vault, self.vault).records()
             selected = {key: records[key] for key in data["device_keys"]}
             for key, record in selected.items():
-                if record["phase"] != "needs_credentials":
+                if record["phase"] not in ("needs_credentials", "transition_required"):
                     try:
-                        validate_target(
-                            record["target"], self.hass.config_entries.async_get_entry(key), record.get("source_pin")
-                        )
+                        validate_target(record["target"], record.get("source_pin"))
                     except SafetyFailure:
                         record.update(phase="blocked", error="identity_validation_failed")
             self.records = selected
@@ -254,7 +259,7 @@ class Runtime:
     def publish(self, target: Target, values: Readings) -> None:
         key = target["entry_id"]
         self.readings[key] = (dt_util.utcnow(), values)
-        # Report this device synchronously before verify_native checks HA's
+        # Report this device synchronously before verify_publication checks HA's
         # last_reported timestamps. The final coordinator update publishes
         # health/inventory once, without an inventory-wide broadcast per read.
         for listener in tuple(self.measurement_listeners.get(key, ())):
@@ -280,8 +285,7 @@ class Runtime:
 
     async def read_target(self, target: Target) -> Readings:
         values = await self.backend.read_ha(target)
-        if target.get("owned"):
-            self.publish(target, values)
+        self.publish(target, values)
         return values
 
     async def preflight(self) -> None:
@@ -313,7 +317,7 @@ class Runtime:
     async def finish_publication(self, key: str) -> None:
         record = self.records[key]
         try:
-            await self.verify_native(record["target"])
+            await self.verify_publication(record["target"])
         except (SafetyFailure, OSError):
             return
         record["phase"] = "active"
@@ -345,7 +349,11 @@ class Runtime:
                 async with self.engine.lock:
                     async with asyncio.TaskGroup() as group:
                         for key, record in list(self.records.items()):
-                            if not self.stopped and record["phase"] != "active" and record["target"].get("owned"):
+                            if (
+                                not self.stopped
+                                and record["phase"] not in ("active", "transition_required")
+                                and record["target"].get("owned")
+                            ):
                                 group.create_task(self.inspect_pending(key))
                     self.sync_targets()
             await self.engine.check_all()
@@ -391,49 +399,27 @@ class Runtime:
             if key in self.records
         ]
 
-    def native_sensor_ids(self, target: Target) -> list[str]:
-        check_current(target, self.hass.config_entries.async_get_entry(target["entry_id"]))
-        return sensor_ids(self.hass, target["entry_id"])
+    async def verify_publication(self, target: Target) -> None:
+        ids = self.entities.get(target["entry_id"], {})
+        if set(ids) != {"temperature", "humidity"}:
+            raise OSError("sensor_entities_not_ready")
+        states = [self.hass.states.get(entity_id) for entity_id in ids.values()]
+        sample = self.readings.get(target["entry_id"])
+        if not sample or not all(
+            s and s.state not in ("unknown", "unavailable") and s.last_reported >= sample[0] for s in states
+        ):
+            raise OSError("sensor_reports_not_fresh")
 
-    async def verify_native(self, target: Target) -> None:
-        if target.get("owned"):
-            ids = self.entities.get(target["entry_id"], {})
-            if set(ids) != {"temperature", "humidity"}:
-                raise OSError("sensor_entities_not_ready")
-            states = [self.hass.states.get(entity_id) for entity_id in ids.values()]
-            sample = self.readings.get(target["entry_id"])
-            if not sample or not all(
-                s and s.state not in ("unknown", "unavailable") and s.last_reported >= sample[0] for s in states
-            ):
-                raise OSError("sensor_reports_not_fresh")
-        else:
-            verify_readings(self.hass, target["entry_id"], self.native_sensor_ids(target))
-
-    async def reload_entry(self, target: Target) -> None:
-        if target.get("owned"):
-            await self.read_target(target)
-            await self.verify_native(target)
-            return
-        check_current(target, self.hass.config_entries.async_get_entry(target["entry_id"]))
-        started = dt_util.utcnow()
-        if not await self.hass.config_entries.async_reload(target["entry_id"]):
-            raise OSError("native_reload_failed")
-        ids = self.native_sensor_ids(target)
-        async with asyncio.timeout(30):
-            while True:
-                states = [self.hass.states.get(entity_id) for entity_id in ids]
-                if all(
-                    s is not None and s.state not in ("unknown", "unavailable") and s.last_reported >= started
-                    for s in states
-                ):
-                    await self.verify_native(target)
-                    return
-                await asyncio.sleep(1)
+    async def refresh_publication(self, target: Target) -> None:
+        await self.read_target(target)
+        await self.verify_publication(target)
 
     async def resume_device(self, key: str) -> None:
         if conflicting_recovery(self.hass):
             raise SafetyFailure("competing_recovery")
         async with self.engine.lock:
+            if self.records[key]["phase"] == "transition_required":
+                raise SafetyFailure("explicit_transition_required")
             if self.records[key]["phase"] == "active" or self.records[key].get("commissioned"):
                 record = self.records[key]
                 record["cancelled"] = False
@@ -463,6 +449,8 @@ class Runtime:
     async def set_recovery(self, key: str, enabled: bool) -> bool:
         async with self.engine.lock:
             record = self.records[key]
+            if record["phase"] == "transition_required":
+                raise SafetyFailure("explicit_transition_required")
             if enabled and "source" not in record["target"]:
                 return False
             if enabled:
@@ -522,7 +510,7 @@ class Runtime:
             if state.last_repair is not None and state.last_repair == state.last_verified:
                 persistent_notification.async_create(
                     self.hass,
-                    f"{name}: HA's missing pairing was restored and fresh native sensor readings were verified. "
+                    f"{name}: The dedicated controller's missing pairing was restored and fresh sensor readings were verified. "
                     f"Total repairs: {state.repairs}.",
                     title="HomePod connection recovered",
                     notification_id=notification_id + "_recovered",
@@ -535,7 +523,7 @@ class Runtime:
                 f"{name}: {state.status.replace('_', ' ')}. "
                 f"Reason: {(state.reason or 'authentication_failed').replace('_', ' ')}. "
                 "Automatic repair is limited to one attempt per hour and three attempts per day. "
-                "Pending native reloads retry at most three times per hour. "
+                "Pending owned sensor publication retries at most three times per hour. "
                 "Identity or key mismatches require investigation.",
                 title="HomePod recovery needs attention",
                 notification_id=notification_id,

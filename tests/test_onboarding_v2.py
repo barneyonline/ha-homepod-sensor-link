@@ -47,7 +47,7 @@ def entry(data=None):
         options={},
         source="user",
         unique_id=DOMAIN,
-        version=2,
+        version=3,
         minor_version=1,
         discovery_keys={},
         subentries_data=None,
@@ -253,7 +253,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         async def scope(*args, **kwargs):
             yield pairing
 
-        backend = HomeKitBackend(None, None, lambda _: None)
+        backend = HomeKitBackend(None, None)
         backend.session = scope
         self.assertTrue(await backend.restore_missing(self.target))
         self.assertEqual(rows[:1], before)
@@ -573,23 +573,6 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.async_progress(), [])
         self.assertEqual(self.vault.records(), {})
 
-    async def test_native_adoption_without_recovery_creates_no_owned_measurements(self):
-        target, native = fixture()
-        native.title = "Disposable native entry"
-        backend = SimpleNamespace(read_ha=AsyncMock(), inspect_recovery=AsyncMock(), restore_missing=AsyncMock())
-        found = {target["accessory_id"]: {"name": native.title, "native_entry_id": native.entry_id}}
-        with patch.object(self.hass.config_entries, "async_entries", return_value=[native]):
-            keys = await prepare(
-                self.hass, self.vault, backend, list(found), [], {"controllers": [], "accessories": {}}, found
-            )
-        record = self.vault.records()[keys[0]]
-        self.assertFalse(record["target"].get("owned", False))
-        self.assertFalse(record["target"]["recovery"])
-        self.assertEqual(record["target"]["ha_id"], target["ha_id"])
-        self.assertNotIn("source", record["target"])
-        backend.inspect_recovery.assert_not_called()
-        backend.restore_missing.assert_not_called()
-
     async def test_owned_pairing_retains_exact_exported_identifier_case(self):
         export = self.export
         raw = self.target["accessory_id"].upper()
@@ -623,7 +606,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_recovery_keeps_verified_admin_after_publication(self):
         config, runtime = await self.make_runtime()
-        runtime.verify_native = AsyncMock()
+        runtime.verify_publication = AsyncMock()
         await runtime.finish_publication(self.key)
         self.assertIn("source", self.vault.records()[self.key]["target"])
         status = RecoveryStatus(runtime, self.target)
@@ -717,36 +700,6 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(values)
         self.backend.restore_missing.assert_not_called()
 
-    async def test_broken_native_pairing_can_accept_admin_for_bounded_engine_recovery(self):
-        target, native = fixture()
-        native.title = "Disposable native"
-        source = self.source
-
-        async def read(_target, source=False):
-            if not source:
-                raise AuthenticationFailure()
-            return {"temperature": 20, "humidity": 40}
-
-        backend = SimpleNamespace(
-            read_ha=AsyncMock(side_effect=read), inspect_recovery=AsyncMock(), restore_missing=AsyncMock()
-        )
-        found = {target["accessory_id"]: {"name": native.title, "native_entry_id": native.entry_id}}
-        with patch.object(self.hass.config_entries, "async_entries", return_value=[native]):
-            keys = await prepare(
-                self.hass,
-                self.vault,
-                backend,
-                list(found),
-                list(found),
-                {"controllers": [source], "accessories": {}},
-                found,
-            )
-        record = self.vault.records()[keys[0]]
-        self.assertEqual(record["phase"], "verified")
-        self.assertNotIn("authorised_boot", record)
-        self.assertIn("source", record["target"])
-        backend.restore_missing.assert_not_called()
-
     async def test_manage_removal_removes_only_owned_entities_and_device(self):
         config, runtime = await self.make_runtime()
         platform = EntityPlatform(
@@ -792,8 +745,8 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         state.attempts = [600]
         state.repairs = 3
         state.blocked = True
-        state.native_pending = True
-        state.native_attempts = [900]
+        state.publication_pending = True
+        state.publication_attempts = [900]
         await runtime.save_state(runtime.engine.snapshot())
         data = json.loads((Path(self.directory.name) / DATA_FILE).read_text())
         self.assertIn(self.key, data["records"])
@@ -805,8 +758,8 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         restored = restarted.engine.states[self.key]
         self.assertEqual((restored.repairs, restored.attempts), (3, [600]))
         self.assertTrue(restored.blocked)
-        self.assertTrue(restored.native_pending)
-        self.assertEqual(restored.native_attempts, [900])
+        self.assertTrue(restored.publication_pending)
+        self.assertEqual(restored.publication_attempts, [900])
         await restarted.stop()
 
     async def test_competing_engine_detected_after_startup_pauses_checks(self):
@@ -836,7 +789,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         async def scope(*args, **kwargs):
             yield pairing
 
-        backend = HomeKitBackend(None, None, lambda _: None)
+        backend = HomeKitBackend(None, None)
         backend.session = scope
         backend.write_allowed = lambda: False
         with self.assertRaises(RecoveryPaused):
@@ -970,7 +923,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         async def scope(*args, **kwargs):
             yield pairing
 
-        backend = HomeKitBackend(None, None, lambda _: None)
+        backend = HomeKitBackend(None, None)
         backend.session = scope
         backend.before_write = runtime.persist_pairing_checkpoint
         backend.after_write = runtime.persist_pairing_checkpoint

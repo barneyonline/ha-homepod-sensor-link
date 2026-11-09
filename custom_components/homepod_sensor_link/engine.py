@@ -18,9 +18,9 @@ GRACE = 600
 COOLDOWN = 3600
 WINDOW = 86400
 MAX_ATTEMPTS = 3
-NATIVE_COOLDOWN = 300
-NATIVE_WINDOW = 3600
-NATIVE_MAX_ATTEMPTS = 3
+PUBLICATION_COOLDOWN = 300
+PUBLICATION_WINDOW = 3600
+PUBLICATION_MAX_ATTEMPTS = 3
 
 
 class AuthenticationFailure(Exception):
@@ -50,21 +50,31 @@ class DeviceState:
     reason: str | None = None
     last_error_type: str | None = None
     last_error_location: str | None = None
-    native_pending: bool = False
+    publication_pending: bool = False
     pending_pairing_added: bool = False
-    native_attempts: list[float] = field(default_factory=list)
+    publication_attempts: list[float] = field(default_factory=list)
     recovery_last_checked: float | None = None
     recovery_last_verified: float | None = None
     recovery_status: str = "not_checked"
     recovery_error: str | None = None
 
     def public(self) -> dict[str, Any]:
-        return dict(vars(self), attempts=list(self.attempts), native_attempts=list(self.native_attempts))
+        return dict(vars(self), attempts=list(self.attempts), publication_attempts=list(self.publication_attempts))
 
     @classmethod
     def restore(cls, value: dict[str, Any]) -> DeviceState:
         if not isinstance(value, dict):
             raise SafetyFailure("invalid_persisted_state")
+        value = dict(value)
+        # Older owned-device journals used native-prefixed publication fields.
+        for old, new in (("native_pending", "publication_pending"), ("native_attempts", "publication_attempts")):
+            if old in value and new not in value:
+                value[new] = value[old]
+        if value.get("status") in ("native_reload_pending", "native_unavailable"):
+            value["status"] = {
+                "native_reload_pending": "publication_pending",
+                "native_unavailable": "publication_unavailable",
+            }[value["status"]]
         names = cls.__dataclass_fields__
         state = cls(**{k: v for k, v in value.items() if k in names})
         # Never let malformed storage erase cooldowns through NaN comparisons,
@@ -90,18 +100,19 @@ class DeviceState:
                 type(getattr(state, key)) is not int or getattr(state, key) < 0 for key in ("auth_failures", "repairs")
             )
             or any(
-                type(getattr(state, key)) is not bool for key in ("blocked", "native_pending", "pending_pairing_added")
+                type(getattr(state, key)) is not bool
+                for key in ("blocked", "publication_pending", "pending_pairing_added")
             )
             or any(
                 not isinstance(getattr(state, key), list) or not all(finite(t) for t in getattr(state, key))
-                for key in ("attempts", "native_attempts")
+                for key in ("attempts", "publication_attempts")
             )
         ):
             raise SafetyFailure("invalid_persisted_state")
         # A failed repair may already have reached the accessory; retain pending
         # publication conservatively without ever re-adding an accepted pairing.
         if state.status == "repair_failed":
-            state.native_pending = True
+            state.publication_pending = True
         return state
 
 
@@ -129,18 +140,18 @@ def canonical(rows: list[PairingRow]) -> Counter[tuple[str, str, int]]:
 
 
 class RecoveryEngine:
-    """Check fresh HA sessions and restore only an absent, pinned controller."""
+    """Check dedicated controller sessions and restore only their absent pinned pairing."""
 
     def __init__(
         self,
         targets: list[Target],
         backend: Backend,
         save: SaveState,
-        reload_entry: Callable[[Target], Awaitable[None]],
+        refresh_publication: Callable[[Target], Awaitable[None]],
         notify: Callable[[Target, DeviceState, bool], Awaitable[None]],
         clock: Clock,
         states: Snapshot | None = None,
-        verify_native: Callable[[Target], Awaitable[None]] | None = None,
+        verify_publication: Callable[[Target], Awaitable[None]] | None = None,
         automatic_recovery: bool = True,
         is_active: Callable[[], bool] | None = None,
         check_completed: Callable[[str], None] | None = None,
@@ -148,10 +159,10 @@ class RecoveryEngine:
         self.targets = targets
         self.backend = backend
         self.save = save
-        self.reload_entry = reload_entry
+        self.refresh_publication = refresh_publication
         self.notify = notify
         self.clock = clock
-        self.verify_native = verify_native
+        self.verify_publication = verify_publication
         self.automatic_recovery = automatic_recovery
         self.is_active = is_active or (lambda: True)
         self.check_completed = check_completed or (lambda _key: None)
@@ -189,7 +200,7 @@ class RecoveryEngine:
         state.last_checked = now
         # Retain future timestamps on a backwards clock jump: fail closed.
         state.attempts = [t for t in state.attempts if now - t < WINDOW]
-        state.native_attempts = [t for t in state.native_attempts if now - t < NATIVE_WINDOW]
+        state.publication_attempts = [t for t in state.publication_attempts if now - t < PUBLICATION_WINDOW]
         if state.blocked:
             return
         try:
@@ -221,24 +232,24 @@ class RecoveryEngine:
         else:
             state.auth_since, state.auth_failures = None, 0
             if (
-                not state.native_pending or (not self.automatic_recovery or not target.get("recovery", True))
-            ) and self.verify_native is not None:
+                not state.publication_pending or (not self.automatic_recovery or not target.get("recovery", True))
+            ) and self.verify_publication is not None:
                 try:
-                    await self.verify_native(target)
+                    await self.verify_publication(target)
                 except SafetyFailure:
-                    state.blocked, state.status, state.reason = True, "blocked", "native_inventory_changed"
+                    state.blocked, state.status, state.reason = True, "blocked", "sensor_inventory_changed"
                     await self.notify(target, state, False)
                     return
                 except Exception:
                     if not self.automatic_recovery or not target.get("recovery", True):
-                        state.status, state.reason = "native_unavailable", "native_readings_not_fresh"
+                        state.status, state.reason = "publication_unavailable", "sensor_reports_not_fresh"
                         return
-                    state.native_pending = True
+                    state.publication_pending = True
                     await self.save(self.snapshot())
-            if state.native_pending and (not self.automatic_recovery or not target.get("recovery", True)):
-                state.status, state.reason = "native_reload_pending", "automatic_recovery_disabled"
-            elif state.native_pending:
-                await self._finish_native(target, state)
+            if state.publication_pending and (not self.automatic_recovery or not target.get("recovery", True)):
+                state.status, state.reason = "publication_pending", "automatic_recovery_disabled"
+            elif state.publication_pending:
+                await self._finish_publication(target, state)
             else:
                 await self._healthy(target, state)
             return
@@ -261,49 +272,49 @@ class RecoveryEngine:
         # Persist the attempt BEFORE any pairing write, surviving restart or failure.
         state.attempts.append(now)
         state.status, state.reason = "repairing", None
-        state.native_pending = True
+        state.publication_pending = True
         await self.save(self.snapshot())
         try:
             added = await self.backend.restore_missing(target)
             state.pending_pairing_added = state.pending_pairing_added or added
             await self.save(self.snapshot())
-            # Independently verify with HA's dedicated private key before reloading HA.
+            # Independently verify our dedicated private key before publishing owned sensor reports.
             await self.backend.read_ha(target)
         except SafetyFailure:
             state.blocked, state.status, state.reason = True, "blocked", "repair_safety_check_failed"
             await self.notify(target, state, False)
             return
         except Exception:
-            state.status, state.reason = "repair_failed", "recovery_or_reload_failed"
+            state.status, state.reason = "repair_failed", "recovery_or_publication_failed"
             await self.notify(target, state, False)
             return
-        await self._finish_native(target, state)
+        await self._finish_publication(target, state)
 
-    async def _finish_native(self, target: Target, state: DeviceState) -> None:
-        """Retry a pending native reload without re-adding an accepted pairing."""
+    async def _finish_publication(self, target: Target, state: DeviceState) -> None:
+        """Retry pending owned sensor publication without re-adding an accepted pairing."""
         now = self.clock()
-        if len(state.native_attempts) >= NATIVE_MAX_ATTEMPTS or (
-            state.native_attempts and now - state.native_attempts[-1] < NATIVE_COOLDOWN
+        if len(state.publication_attempts) >= PUBLICATION_MAX_ATTEMPTS or (
+            state.publication_attempts and now - state.publication_attempts[-1] < PUBLICATION_COOLDOWN
         ):
-            state.status, state.reason = "native_reload_pending", "native_reload_rate_limit"
+            state.status, state.reason = "publication_pending", "publication_rate_limit"
             await self.notify(target, state, False)
             return
-        state.native_attempts.append(now)
-        state.status, state.reason = "native_reload_pending", None
+        state.publication_attempts.append(now)
+        state.status, state.reason = "publication_pending", None
         await self.save(self.snapshot())
         try:
-            await self.reload_entry(target)
-            if self.verify_native is not None:
-                await self.verify_native(target)
+            await self.refresh_publication(target)
+            if self.verify_publication is not None:
+                await self.verify_publication(target)
         except SafetyFailure:
-            state.blocked, state.status, state.reason = True, "blocked", "native_inventory_changed"
+            state.blocked, state.status, state.reason = True, "blocked", "sensor_inventory_changed"
             await self.notify(target, state, False)
             return
         except Exception:
-            state.status, state.reason = "native_reload_pending", "native_reload_or_verification_failed"
+            state.status, state.reason = "publication_pending", "sensor_publication_failed"
             await self.notify(target, state, False)
             return
-        state.native_pending = False
+        state.publication_pending = False
         added = state.pending_pairing_added
         state.pending_pairing_added = False
         state.auth_since, state.auth_failures = None, 0

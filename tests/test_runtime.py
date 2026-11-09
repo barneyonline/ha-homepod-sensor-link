@@ -33,8 +33,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             options={},
             source="user",
             unique_id="homepod_sensor_link",
-            version=2,
-            minor_version=2,
+            version=3,
+            minor_version=3,
             discovery_keys={},
             subentries_data=None,
         )
@@ -56,9 +56,9 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=lambda t: {"entry_id": t["entry_id"], "recovery_admin_verified": True}
             ),
         )
-        self.runtime.reload_entry = AsyncMock()
+        self.runtime.refresh_publication = AsyncMock()
         self.runtime.notify = AsyncMock()
-        self.runtime.verify_native = AsyncMock()
+        self.runtime.verify_publication = AsyncMock()
         self.runtime.notify_access = AsyncMock()
         await self.runtime.initialize()
         self.entry.runtime_data = self.runtime
@@ -117,40 +117,6 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await async_remove_entry(self.hass, self.entry)
         self.assertFalse(secret.exists())
         self.assertEqual(unrelated.read_text(), "preserve-native-entries")
-
-    async def test_native_verification_requires_loaded_entry_and_two_numeric_entities(self):
-        ids = ["sensor.test_temperature", "sensor.test_humidity"]
-        self.runtime.native_sensor_ids = lambda _: ids
-        native = SimpleNamespace(disabled_by=None, state=SimpleNamespace(value="loaded"))
-        with patch.object(self.hass.config_entries, "async_get_entry", return_value=native):
-            self.hass.states.async_set(ids[0], "22.5", {"device_class": "temperature"})
-            self.hass.states.async_set(ids[1], "50", {"device_class": "humidity"})
-            await Runtime.verify_native(self.runtime, self.targets[0])
-            for value in ("unavailable", "unknown", "nan", "infinity"):
-                self.hass.states.async_set(ids[0], value, {"device_class": "temperature"})
-                with self.assertRaises(OSError):
-                    await Runtime.verify_native(self.runtime, self.targets[0])
-            self.hass.states.async_set(ids[0], "22.5", {"device_class": "temperature"})
-            native.state.value = "setup_retry"
-            with self.assertRaises(OSError):
-                await Runtime.verify_native(self.runtime, self.targets[0])
-
-    async def test_native_reload_requires_new_reports_from_actual_sensors(self):
-        target, native = fixture()
-        ids = ["sensor.test_temperature", "sensor.test_humidity"]
-        self.runtime.native_sensor_ids = lambda _: ids
-
-        async def reload(_):
-            self.hass.states.async_set(ids[0], "22.5", {"device_class": "temperature"})
-            self.hass.states.async_set(ids[1], "50", {"device_class": "humidity"})
-            return True
-
-        with (
-            patch.object(self.hass.config_entries, "async_get_entry", return_value=native),
-            patch.object(self.hass.config_entries, "async_reload", side_effect=reload),
-        ):
-            await Runtime.reload_entry(self.runtime, target)
-        self.runtime.verify_native.assert_awaited_once_with(target)
 
 
 if __name__ == "__main__":

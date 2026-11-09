@@ -29,7 +29,7 @@ class BackendEdgeTests(unittest.IsolatedAsyncioTestCase):
             list_pairings=AsyncMock(),
             add_pairing=AsyncMock(),
         )
-        self.backend = HomeKitBackend(Mock(), Mock(), lambda _: self.entry)
+        self.backend = HomeKitBackend(Mock(), Mock())
 
         @asynccontextmanager
         async def session(*args, **kwargs):
@@ -79,14 +79,16 @@ class BackendEdgeTests(unittest.IsolatedAsyncioTestCase):
         }
         with self.assertRaises(SafetyFailure):
             await self.backend.read_ha(self.target)
-        self.target["owned"] = False
-        self.assertEqual((await self.backend.read_ha(self.target))["temperature"], 21)
+        self.pairing.list_accessories_and_characteristics.return_value = self.layout()
         self.target["expected_pairings"] = [
             {"pairingId": self.target["ha_id"], "publicKey": self.target["ha_key"], "permissions": 1}
         ]
         self.backend.inspect_recovery = AsyncMock(return_value={"ha_identity_present": False})
         with self.assertRaises(OSError):
             await self.backend.read_ha(self.target)
+        self.backend.inspect_recovery.reset_mock()
+        self.assertEqual((await self.backend.read_ha(self.target, source=True))["temperature"], 20)
+        self.backend.inspect_recovery.assert_not_called()
         self.pairing.add_pairing.assert_not_called()
 
     async def test_admin_and_ha_table_pins_are_validated_and_accepted_checkpoint_clears(self):
@@ -95,8 +97,8 @@ class BackendEdgeTests(unittest.IsolatedAsyncioTestCase):
             "publicKey": self.target["source"]["iOSDeviceLTPK"],
             "permissions": 1,
         }
-        own = {"pairingId": self.target["ha_id"], "publicKey": self.target["ha_key"], "permissions": 1}
-        for rows in ([{**admin, "permissions": 0}], [admin, {**own, "permissions": 0}]):
+        own = {"pairingId": self.target["ha_id"], "publicKey": self.target["ha_key"], "permissions": 0}
+        for rows in ([{**admin, "permissions": 0}], [admin, {**own, "permissions": 1}]):
             self.pairing.list_pairings.return_value = rows
             with self.assertRaises(SafetyFailure):
                 await self.backend.inspect_recovery(self.target)
@@ -149,7 +151,7 @@ class EngineEdgeTests(unittest.IsolatedAsyncioTestCase):
             self.reload,
             self.notify,
             lambda: self.now,
-            verify_native=self.verify,
+            verify_publication=self.verify,
             is_active=lambda: self.active,
         )
 
@@ -188,8 +190,8 @@ class EngineEdgeTests(unittest.IsolatedAsyncioTestCase):
         self.engine.automatic_recovery = False
         self.verify.side_effect = OSError()
         await self.engine.check_all()
-        self.assertEqual(state.status, "native_unavailable")
-        state.native_pending = True
+        self.assertEqual(state.status, "publication_unavailable")
+        state.publication_pending = True
         self.verify.side_effect = None
         await self.engine.check_all()
         self.assertEqual(state.reason, "automatic_recovery_disabled")

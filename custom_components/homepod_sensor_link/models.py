@@ -1,7 +1,7 @@
 """Typed internal seams around validated dynamic HAP/HA/storage dictionaries.
 
-Private wire/storage maps remain dynamic because their schemas differ for native,
-owned and incomplete devices. Validation at each boundary checks these values;
+Private wire/storage maps remain dynamic because their schemas differ for owned,
+paused and incomplete devices. Validation at each boundary checks these values;
 callbacks, lifecycle objects, readings and collections are typed independently.
 """
 

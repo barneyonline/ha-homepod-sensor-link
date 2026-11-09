@@ -1,4 +1,4 @@
-"""Discover, import, adopt and commission through one administrator-owned flow."""
+"""Discover, import and commission dedicated controllers through one administrator-owned flow."""
 
 from __future__ import annotations
 from typing import cast
@@ -16,7 +16,7 @@ from homeassistant import config_entries
 from homeassistant.helpers import selector
 
 from .backend import HomeKitBackend
-from .credentials import DOMAIN, public_targets, pinned_target
+from .credentials import DOMAIN, public_targets
 from .onboarding import discover_devices, controller_session
 from .provisioning import prepare
 import uuid
@@ -36,7 +36,7 @@ def choices(options: dict[str, str], multiple: bool = False, *, dropdown: bool =
 
 
 class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self) -> None:
         self._task: asyncio.Task[list[str]]
@@ -48,6 +48,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovery_hosts: list[str] = []
         self._selected: list[str] = []
         self._managed_device: str | None = None
+        self._transition_confirmed = False
 
     async def _access(self) -> User | None:
         user = local_admin(self.hass)
@@ -103,7 +104,47 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
-        return self.async_show_menu(step_id="reconfigure", menu_options=["devices", "credentials", "manage"])
+        options = ["devices", "credentials", "manage"]
+        if any(record["phase"] == "transition_required" for record in self._vault.records().values()):
+            options.insert(0, "transition")
+        return self.async_show_menu(step_id="reconfigure", menu_options=options)
+
+    async def async_step_transition(self, user_input: Data | None = None) -> ConfigFlowResult:
+        if not await self._access():
+            return self.async_abort(reason="local_admin_required")
+        current = self._current()
+        if current is None:
+            return self.async_abort(reason="invalid_selection")
+        pending = {
+            key: record for key, record in self._vault.records().items() if record["phase"] == "transition_required"
+        }
+        errors = {}
+        if user_input is not None:
+            keys = user_input.get("devices", [])
+            if not keys or len(set(keys)) != len(keys) or not set(keys) <= pending.keys():
+                errors["base"] = "select_devices"
+            elif user_input.get("confirm") is not True:
+                errors["base"] = "confirm_transition"
+            else:
+                self._transition_confirmed = True
+                self._selected = [pending[key]["target"]["accessory_id"] for key in keys]
+                self._recovery_ids = []
+                self._discovered = {
+                    pending[key]["target"]["accessory_id"]: {"name": pending[key]["name"]} for key in keys
+                }
+                return await self.async_step_credentials()
+        return self.async_show_form(
+            step_id="transition",
+            errors=errors,
+            data_schema=vol.Schema(
+                {
+                    vol.Required("devices", default=[]): choices(
+                        {key: record["name"] for key, record in pending.items()}, True
+                    ),
+                    vol.Required("confirm", default=False): selector.BooleanSelector(),
+                }
+            ),
+        )
 
     async def async_step_devices(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
@@ -120,7 +161,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = "discovery_failed"
         # Retained interrupted journals can always be selected for continuation.
         for record in self._vault.records().values():
-            if record["phase"] == "active":
+            if record["phase"] in ("active", "transition_required"):
                 self._discovered.pop(record["target"]["accessory_id"], None)
                 continue
             self._discovered.setdefault(record["target"]["accessory_id"], {"name": record.get("name", "HomePod")})
@@ -166,13 +207,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._recovery_ids = user_input.get("recovery_devices", [])
             if not set(self._recovery_ids) <= set(self._selected):
                 return self.async_abort(reason="invalid_selection")
-            needs_import = any(
-                k in self._recovery_ids or "native_entry_id" not in self._discovered[k] for k in self._selected
-            )
-            if needs_import and self._imported is None:
-                return await self.async_step_credentials()
             if self._imported is None:
-                self._imported = {"controllers": [], "accessories": {}}
+                return await self.async_step_credentials()
             return await self._begin()
         return self.async_show_form(
             step_id="policy",
@@ -280,6 +316,14 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _credentials_ready(self) -> ConfigFlowResult:
         self._discovery_hosts = cast(Data, self._imported).get("discovery_hosts", [])
+        if self._transition_confirmed:
+            try:
+                found = await discover_devices(self.hass, hosts=self._discovery_hosts)
+            except Exception:
+                found = {}
+            for identifier in self._selected:
+                self._discovered[identifier].update(found.get(identifier, {}))
+            return await self._begin()
         if not self._force_validate and (self._discovery_hosts or not self._selected):
             return await self.async_step_devices()
         return await self._begin()
@@ -294,7 +338,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         results = []
         try:
             async with controller_session(self.hass) as (controller, zc):
-                backend = HomeKitBackend(controller, zc, self.hass.config_entries.async_get_entry)
+                backend = HomeKitBackend(controller, zc)
                 operations = ProvisioningBackend(
                     backend.read_ha, backend.restore_missing, backend.inspect_recovery, backend.pairing_present
                 )
@@ -311,6 +355,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 self._discovered,
                                 flow_id=self.flow_id,
                                 force_validate=self._force_validate,
+                                transition_confirmed=self._transition_confirmed,
                             )
                             results.extend(keys)
                     except Exception:
@@ -320,21 +365,9 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             (r for r in self._vault.records().values() if r["target"]["accessory_id"] == identifier),
                             None,
                         )
-                        native = next(
-                            (
-                                e
-                                for e in self.hass.config_entries.async_entries("homekit_controller")
-                                if str(e.data.get("AccessoryPairingID", "")).lower() == identifier
-                            ),
-                            None,
-                        )
-                        target = (
-                            pinned_target(native)
-                            if native is not None
-                            else {"entry_id": uuid.uuid4().hex, "accessory_id": identifier, "owned": True}
-                        )
+                        target = {"entry_id": uuid.uuid4().hex, "accessory_id": identifier, "owned": True}
                         target["recovery"] = identifier in self._recovery_ids
-                        phase = "verified" if native is not None and not target["recovery"] else "needs_credentials"
+                        phase = "needs_credentials"
                         record = previous or {
                             "target": target,
                             "name": self._discovered[identifier]["name"],
@@ -377,10 +410,20 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._committed = True
         if current:
             runtime = getattr(current, "runtime_data", None)
-            failed = self.context.get("source") == "reauth" and any(
-                records[key]["phase"] in ("needs_credentials", "blocked")
-                or records[key].get("error") == "verification_failed"
-                for key in keys
+            failed = (
+                self._transition_confirmed
+                and any(
+                    records[key]["phase"] in ("transition_required", "needs_credentials", "blocked")
+                    or records[key].get("error") == "verification_failed"
+                    for key in keys
+                )
+            ) or (
+                self.context.get("source") == "reauth"
+                and any(
+                    records[key]["phase"] in ("needs_credentials", "blocked")
+                    or records[key].get("error") == "verification_failed"
+                    for key in keys
+                )
             )
             if runtime and not runtime.stopped:
                 await runtime.accept_inventory({"device_keys": all_keys, "pins": pins, "admin_pins": admin_pins})
@@ -444,7 +487,9 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="manage_actions",
             description_placeholders={"name": record["name"]},
-            menu_options=[
+            menu_options=["manage_remove", "manage"]
+            if record["phase"] == "transition_required"
+            else [
                 "manage_resume",
                 "manage_cancel",
                 "manage_recovery_off" if record["target"].get("recovery", True) else "manage_recovery_on",
@@ -480,6 +525,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if key not in cast(ConfigEntry, current).data["device_keys"] or key not in runtime.records:
             return self.async_abort(reason="invalid_selection")
         record = runtime.records[key]
+        if record["phase"] == "transition_required" and action != "remove":
+            return self.async_abort(reason="explicit_transition_required")
         errors = {}
         if user_input is not None and action == "remove" and not user_input.get("confirm"):
             errors["base"] = "confirm_removal"

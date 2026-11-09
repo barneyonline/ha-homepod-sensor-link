@@ -234,12 +234,12 @@ class RuntimeFailureTests(unittest.IsolatedAsyncioTestCase):
             runtime.entities[self.key] = {"temperature": "sensor.disposable_t", "humidity": "sensor.disposable_h"}
             runtime.readings[self.key] = (dt_util.utcnow(), {"temperature": 20, "humidity": 40})
             with self.assertRaises(OSError):
-                await runtime.verify_native(self.target)
+                await runtime.verify_publication(self.target)
             with (
                 patch.object(runtime, "read_target", AsyncMock()),
-                patch.object(runtime, "verify_native", AsyncMock()) as verify,
+                patch.object(runtime, "verify_publication", AsyncMock()) as verify,
             ):
-                await runtime.reload_entry(self.target)
+                await runtime.refresh_publication(self.target)
                 verify.assert_awaited_once()
             runtime.stopped = True
             await runtime.update()

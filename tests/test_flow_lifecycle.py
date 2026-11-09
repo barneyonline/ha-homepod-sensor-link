@@ -274,20 +274,6 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["step_id"], "devices")
             self.assertEqual(result["data_schema"]({})["devices"], ["missing-homepod"])
 
-    async def test_monitor_only_native_setup_needs_no_export(self):
-        target, source_entry = fixture()
-        native = native_config(source_entry.data)
-        self.hass.config_entries._entries[native.entry_id] = native
-        flow = self.flow()
-        async with self.flow_environment():
-            await flow.async_step_user()
-            flow._selected = [target["accessory_id"]]
-            flow._discovered = {target["accessory_id"]: {"name": "Native", "native_entry_id": native.entry_id}}
-            result = await self.finish_flow(flow, await flow.async_step_policy({"recovery_devices": []}))
-            self.assertEqual(result["type"], FlowResultType.CREATE_ENTRY)
-            self.assertEqual(result["data"]["device_keys"], [native.entry_id])
-            self.assertNotIn("source", self.vault.records()[native.entry_id]["target"])
-
     async def test_partial_failure_retains_native_reference_and_prior_journal(self):
         target, source_entry = fixture()
         native = native_config(source_entry.data)
