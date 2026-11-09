@@ -27,6 +27,7 @@ from .backend import HomeKitBackend
 from .engine import INTERVAL, SafetyFailure
 from .names import discover_airplay, confirmed_names
 from .vault import Vault
+from .resolution import resolve_all
 
 DISCOVERY_WINDOW = 5
 DISCOVERY_RESOLVE_TIMEOUT = 3000
@@ -124,13 +125,11 @@ async def _discover_candidates(hass: HomeAssistant, hosts: list[str] | None = No
             # One stale/unresolvable service must not hide healthy candidates.
             return None
 
-    return {
-        result[0]: result[1]
-        for result in await asyncio.gather(
-            *(resolve(name) for name in names), *(resolve(info.name, info) for info in directed)
-        )
-        if result is not None
-    }
+    # Directed replies already contain fresh records: parse them before waiting
+    # for network resolution, retaining their precedence over browser results.
+    direct_results = [await resolve(info.name, info) for info in directed]
+    results = [*await resolve_all(names, resolve), *direct_results]
+    return {result[0]: result[1] for result in results if result is not None}
 
 
 async def discover_devices(hass: HomeAssistant, hosts: list[str] | None = None) -> dict[str, Data]:

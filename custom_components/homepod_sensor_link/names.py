@@ -13,6 +13,7 @@ from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo
 
 from .models import Data
 from .directed_discovery import discover_hosts
+from .resolution import resolve_all
 
 AIRPLAY_TYPE = "_airplay._tcp.local."
 DISCOVERY_WINDOW = 5
@@ -56,7 +57,7 @@ async def discover_airplay(hass: HomeAssistant) -> list[Data]:
                 except (OSError, ValueError):
                     return None
 
-            return [result for result in await asyncio.gather(*(resolve(name) for name in names)) if result is not None]
+            return [result for result in await resolve_all(names, resolve) if result is not None]
         finally:
             primary = sys.exception()
             try:
