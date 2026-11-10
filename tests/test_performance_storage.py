@@ -93,6 +93,29 @@ class ProtectedStorageOperationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.hass.async_stop(force=True)
 
+    async def test_state_only_save_does_not_copy_credentials_and_still_commits(self):
+        for count in (1, 16, 64):
+            copies = []
+
+            class CountedRecord(dict):
+                def __deepcopy__(self, memo):
+                    copies.append(True)
+                    return deepcopy(dict(self), memo)
+
+            self.vault.data["records"] = {
+                str(index): CountedRecord(target={"entry_id": str(index)}, phase="active") for index in range(count)
+            }
+            state = {"disposable": {"attempts": [1], "last_checked": 2}}
+            with patch.object(vault_module.os, "fsync", wraps=vault_module.os.fsync) as fsync:
+                await self.vault.save_states(state)
+                self.assertEqual(copies, [])
+                self.assertEqual(fsync.call_count, 2)
+            state["disposable"]["attempts"].append(3)
+            self.assertEqual(self.vault.data["states"]["disposable"]["attempts"], [1])
+            reloaded = await Vault(self.hass).load()
+            self.assertEqual(len(reloaded.records()), count)
+            self.assertEqual(reloaded.data["states"]["disposable"]["attempts"], [1])
+
     async def test_skipped_audit_performs_no_protected_journal_io_or_fsync(self):
         now = [0]
         backend = SimpleNamespace(inspect_recovery=AsyncMock(return_value={"verified": True}))

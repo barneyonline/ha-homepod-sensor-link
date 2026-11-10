@@ -132,8 +132,9 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         for path in (
             "custom_components.homepod_sensor_link.onboarding.discover_airplay",
             "custom_components.homepod_sensor_link.refresh_names",
+            "custom_components.homepod_sensor_link.discover_devices",
         ):
-            boundary = patch(path, AsyncMock(return_value=[]))
+            boundary = patch(path, AsyncMock(return_value={} if path.endswith(".discover_devices") else []))
             boundary.start()
             self.addCleanup(boundary.stop)
         self.directory = tempfile.TemporaryDirectory()

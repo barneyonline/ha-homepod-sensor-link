@@ -10,7 +10,7 @@ from zeroconf.asyncio import AsyncZeroconf
 
 
 import asyncio
-from contextlib import asynccontextmanager, suppress
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 import ipaddress
 import math
 import sys
@@ -18,6 +18,7 @@ import sys
 from aiohomekit.controller.ip.pairing import IpPairing
 from aiohomekit.controller.abstract import AbstractPairingData
 from aiohomekit.exceptions import (
+    AccessoryDisconnectedError,
     AccessoryNotFoundError,
     AuthenticationError,
     IncorrectPairingIdError,
@@ -28,6 +29,10 @@ from zeroconf.asyncio import AsyncServiceInfo
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .engine import AuthenticationFailure, SafetyFailure, RecoveryPaused, canonical
+
+
+class AccessoryIdMismatch(SafetyFailure):
+    """The contacted endpoint belongs to a different accessory ID."""
 
 
 def check_current(target: Target) -> Data:
@@ -82,7 +87,7 @@ class HomeKitBackend:
         if self.after_write:
             await self.after_write(target)
 
-    async def endpoint(self, target: Target) -> Data:
+    async def endpoint(self, target: Target, *, require_discovery: bool = False) -> Data:
         try:
             discovery = await self.controller.async_find(target["accessory_id"], timeout=2)
         except AccessoryNotFoundError:
@@ -94,6 +99,8 @@ class HomeKitBackend:
                 if description.id.lower() != target["accessory_id"].lower():
                     raise SafetyFailure("advertised_identity_changed")
                 return self._endpoint(description.addresses, description.port)
+        if require_discovery:
+            raise OSError("endpoint_unavailable")
         # Only the integration's own saved endpoint is a fallback. Authentication
         # still verifies the accessory's pinned identity before any pairing write.
         data = check_current(target)
@@ -118,19 +125,56 @@ class HomeKitBackend:
     @asynccontextmanager
     async def session(self, target: Target, source: bool = False) -> AsyncIterator[IpPairing]:
         data = check_current(target)
-        data.update(await self.endpoint(target))
+        require_discovery = False
+        try:
+            saved = self._endpoint(data.get("AccessoryIPs") or [data.get("AccessoryIP")], data.get("AccessoryPort"))
+        except OSError:
+            pass
+        else:
+            async with AsyncExitStack() as stack:
+                try:
+                    pairing = await stack.enter_async_context(self._session(target, source, saved, 2))
+                except AccessoryIdMismatch:
+                    # DHCP may have reassigned this hint to another accessory.
+                    # Require a matched discovery before trying the pinned ID.
+                    require_discovery = True
+                except (OSError, AccessoryDisconnectedError, AccessoryNotFoundError):
+                    pass
+                else:
+                    # Retry only connection establishment, never the yielded
+                    # operation (which may already have added a pairing).
+                    yield pairing
+                    return
+        endpoint = await self.endpoint(target, require_discovery=require_discovery)
+        async with self._session(target, source, endpoint, 10) as pairing:
+            # Remember an authenticated move for subsequent fresh sessions.
+            target["pairing"].update(endpoint)
+            yield pairing
+
+    @asynccontextmanager
+    async def _session(
+        self, target: Target, source: bool, endpoint: Data, connect_timeout: float
+    ) -> AsyncIterator[IpPairing]:
+        data = check_current(target)
+        data.update(endpoint)
         if source:
             data.update(target["source"])
         pairing = IpPairing(self.controller, cast(AbstractPairingData, data))
         try:
             async with asyncio.timeout(35):
+                async with asyncio.timeout(connect_timeout):
+                    await cast(Callable[[], Awaitable[None]], pairing._ensure_connected)()
                 yield pairing
         except Exception as error:
             last = pairing.connection.last_connector_error
             if isinstance(error, (IncorrectPairingIdError, InvalidSignatureError)) or isinstance(
                 last, (IncorrectPairingIdError, InvalidSignatureError)
             ):
-                raise SafetyFailure("accessory_identity_changed") from None
+                if isinstance(error, (AuthenticationError, InvalidSignatureError)) or isinstance(
+                    last, (AuthenticationError, InvalidSignatureError)
+                ):
+                    raise SafetyFailure("accessory_identity_changed") from None
+                raise AccessoryIdMismatch("accessory_identity_changed") from None
             if isinstance(error, AuthenticationError) or isinstance(last, AuthenticationError):
                 if source:
                     raise SafetyFailure("recovery_identity_rejected") from None

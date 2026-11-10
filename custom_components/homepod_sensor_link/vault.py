@@ -131,10 +131,21 @@ class Vault:
             data["states"].pop(key, None)
             await self._commit(data)
 
+    async def rename(self, key: str, name: str) -> bool:
+        """Merge optional metadata without replacing newer credential/policy state."""
+        async with self.lock:
+            if key not in self.data["records"]:
+                return False
+            data = deepcopy(self.data)
+            data["records"][key]["name"] = name
+            await self._commit(data)
+            return True
+
     async def save_states(self, states: Snapshot) -> None:
         async with self.lock:
-            data = deepcopy(self.data)
-            data["states"] = deepcopy(states)
+            # Inventory mutations replace their own copies under this lock.
+            # Keep unchanged credentials shared; isolate the caller's state.
+            data = {**self.data, "states": deepcopy(states)}
             await self._commit(data)
 
     async def pause_flow(self, flow_id: str) -> None:

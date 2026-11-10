@@ -17,7 +17,7 @@ from homeassistant.helpers.storage import Store
 from .migration import migrate_entry
 from .repairs import create_issue
 from .models import Data
-from .onboarding import refresh_names
+from .onboarding import discover_devices, refresh_names
 from .credentials import DOMAIN, public_targets
 from .engine import SafetyFailure
 from .vault import get_vault, Vault
@@ -96,7 +96,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomePodConfigEntry) -> b
         await cast(Callable[[], Awaitable[None]], controller.async_start)()
         runtime = Runtime(hass, entry, targets, controller, zc, vault)
         await runtime.initialize()
-        await refresh_names(hass, runtime.records, vault)
         entry.runtime_data = runtime
         await runtime.preflight()
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -114,11 +113,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomePodConfigEntry) -> b
             raise
         raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key="setup_failed") from None
 
+    async def update_names() -> None:
+        try:
+            discovered = await discover_devices(hass)
+            # Only applying metadata needs the lock. Select current records
+            # afterwards so discovery cannot resurrect removed devices.
+            async with runtime.engine.lock:
+                if runtime.stopped:
+                    return
+                await refresh_names(hass, runtime.records, vault, entry_id=entry.entry_id, discovered=discovered)
+        except Exception:
+            # Optional metadata must not interrupt sensor monitoring.
+            return
+
     async def started(_hass: HomeAssistant) -> None:
         if runtime.stopped:
             return
         runtime.watchdog.start()
-        await runtime.coordinator.async_refresh()
+        await runtime.startup_refresh()
+        if runtime.stopped:
+            return
+        runtime.name_refresh_task = entry.async_create_background_task(
+            hass, update_names(), "HomePod Sensor Link name refresh"
+        )
 
     async def stop(_event: Event) -> None:
         await runtime.stop()
