@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import cast
 from .models import Data
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from collections.abc import AsyncIterator, Callable, Awaitable
 from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncZeroconf, AsyncServiceBrowser, AsyncServiceInfo
@@ -19,6 +20,7 @@ from aiohomekit.zeroconf import HomeKitService
 from homeassistant.components import zeroconf
 
 from .directed_discovery import discover_hosts
+from .credentials import DOMAIN
 from .backend import HomeKitBackend
 from .names import discover_airplay, confirmed_names
 from .vault import Vault
@@ -103,14 +105,26 @@ async def discover_devices(hass: HomeAssistant, hosts: list[str] | None = None) 
     return found
 
 
-async def refresh_names(hass: HomeAssistant, records: dict[str, Data], vault: Vault) -> None:
+async def refresh_names(
+    hass: HomeAssistant,
+    records: dict[str, Data],
+    vault: Vault,
+    *,
+    entry_id: str | None = None,
+    discovered: dict[str, Data] | None = None,
+) -> None:
     """Refresh existing devices on setup, retaining their last name on failure."""
-    try:
-        discovered = await discover_devices(hass)
-    except Exception:
-        return
+    if discovered is None:
+        try:
+            discovered = await discover_devices(hass)
+        except Exception:
+            return
     for key, record in records.items():
         name = discovered.get(record["target"]["accessory_id"].lower(), {}).get("friendly_name")
-        if name and name != record.get("name"):
+        if name and name != record.get("name") and await vault.rename(key, name):
             record["name"] = name
-            await vault.put(key, record)
+            if entry_id is not None:
+                registry = dr.async_get(hass)
+                device = registry.async_get_device_by_identifier((DOMAIN, key), entry_id)
+                if device is not None:
+                    registry.async_update_device(device.id, name=name)

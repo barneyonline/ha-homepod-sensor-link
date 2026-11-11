@@ -41,6 +41,7 @@ from .watchdog import HeartbeatWatchdog
 
 _LOGGER = logging.getLogger(__name__)
 OWNER = DOMAIN + ".owner"
+STARTUP_SAMPLE_MAX_AGE = 30
 
 
 type HomePodConfigEntry = ConfigEntry[Runtime]
@@ -111,6 +112,9 @@ class Runtime:
         self.entities: dict[str, dict[str, str]] = {}
         self.measurement_listeners: dict[str, set[Callable[[], None]]] = {}
         self.pending_tasks: dict[str, asyncio.Task[tuple[Record, Readings | None]]] = {}
+        self.name_refresh_task: asyncio.Task[None] | None = None
+        self._startup_samples: dict[str, tuple[Target, datetime, float]] = {}
+        self._use_startup_samples = False
         self.records: dict[str, Record] = {}
         self.stopped = self.closed = False
         self._runtime_listener: Callable[[], None] | None = None
@@ -284,12 +288,27 @@ class Runtime:
         self.records[key] = record
 
     async def read_target(self, target: Target) -> Readings:
+        key = target["entry_id"]
+        previous = self._startup_samples.pop(key, None) if self._use_startup_samples else None
+        if previous is not None:
+            sample = self.readings.get(key)
+            if (
+                sample is not None
+                and (target, sample[0]) == previous[:2]
+                and not self.engine.states[key].publication_pending
+                and 0 <= self.hass.loop.time() - previous[2] < STARTUP_SAMPLE_MAX_AGE
+                and 0 <= (dt_util.utcnow() - sample[0]).total_seconds() < STARTUP_SAMPLE_MAX_AGE
+            ):
+                # Entities added after preflight report this original sample.
+                # Do not change its timestamp or bypass publication verification.
+                return sample[1]
         values = await self.backend.read_ha(target)
         self.publish(target, values)
         return values
 
     async def preflight(self) -> None:
         """Fresh read-only startup probes; no repair counters or pairing writes."""
+        self._startup_samples.clear()
 
         async def probe(target: Target) -> str:
             state = self.engine.states[target["entry_id"]]
@@ -305,6 +324,11 @@ class Runtime:
             except Exception:
                 state.status, state.auth_failures, state.auth_since = "unreachable", 0, None
             else:
+                self._startup_samples[target["entry_id"]] = (
+                    deepcopy(target),
+                    self.readings[target["entry_id"]][0],
+                    self.hass.loop.time(),
+                )
                 return "verified"
             return state.status
 
@@ -313,6 +337,15 @@ class Runtime:
             await self.save_state(self.engine.snapshot())
         if results and all(result == "unreachable" for result in results):
             raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key="unreachable")
+
+    async def startup_refresh(self) -> None:
+        """Use a recent preflight read once, keeping subsequent checks fresh."""
+        self._use_startup_samples = True
+        try:
+            await self.coordinator.async_refresh()
+        finally:
+            self._use_startup_samples = False
+            self._startup_samples.clear()
 
     async def finish_publication(self, key: str) -> None:
         record = self.records[key]
@@ -567,7 +600,11 @@ class Runtime:
         if self.closed:
             return
         self.stopped = True
+        self._startup_samples.clear()
         self.watchdog.stop()
+        if self.name_refresh_task is not None:
+            self.name_refresh_task.cancel()
+            await asyncio.gather(self.name_refresh_task, return_exceptions=True)
         for task in self.pending_tasks.values():
             task.cancel()
         await asyncio.gather(*list(self.pending_tasks.values()), return_exceptions=True)

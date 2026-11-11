@@ -183,7 +183,7 @@ class NameDiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=[{"name": "Test Room", "addresses": {"192.0.2.1"}}]),
             ),
             patch.object(names, "discover_hosts", AsyncMock(side_effect=[hap, airplay])),
-            patch.object(self.vault, "put", AsyncMock()) as save,
+            patch.object(self.vault, "rename", AsyncMock()) as save,
         ):
             await onboarding.refresh_names(self.hass, records, self.vault)
         save.assert_not_awaited()
@@ -230,15 +230,16 @@ class NameDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(len(call.args[0]) == 64 for call in discover.await_args_list))
 
     async def test_refresh_persists_names_and_retains_them_when_no_longer_matched(self):
-        await self.vault.put(self.key, self.record)
-        records = self.vault.records()
         identifier = self.target["accessory_id"]
         discovered = {identifier: {"friendly_name": "Test Room"}}
-        with patch.object(onboarding, "discover_devices", AsyncMock(return_value=discovered)):
-            await onboarding.refresh_names(self.hass, records, self.vault)
+        for entry_id in (None, "disposable-entry"):
+            await self.vault.put(self.key, self.record)
+            records = self.vault.records()
+            with patch.object(onboarding, "discover_devices", AsyncMock(return_value=discovered)):
+                await onboarding.refresh_names(self.hass, records, self.vault, entry_id=entry_id)
         self.assertEqual(records[self.key]["name"], "Test Room")
         self.assertEqual(self.vault.record(self.key)["name"], "Test Room")
-        with patch.object(self.vault, "put", AsyncMock()) as save:
+        with patch.object(self.vault, "rename", AsyncMock()) as save:
             for result in (discovered, {identifier: {"name": "HomePodSensor disposable"}}, {}):
                 with patch.object(onboarding, "discover_devices", AsyncMock(return_value=result)):
                     await onboarding.refresh_names(self.hass, records, self.vault)
@@ -273,7 +274,9 @@ class NameDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             "discover_devices",
             AsyncMock(return_value={self.target["accessory_id"]: {"friendly_name": "Test Room"}}),
         ):
-            await onboarding.refresh_names(self.hass, runtime.records, self.vault)
+            await onboarding.refresh_names(self.hass, runtime.records, self.vault, entry_id=config.entry_id)
+        self.assertEqual(registry.async_get(device.id).name, "Test Room")
+        self.assertEqual(registry.async_get(device.id).name_by_user, "My Test HomePod")
         platform = EntityPlatform(
             hass=self.hass,
             logger=logging.getLogger(__name__),
@@ -296,3 +299,31 @@ class NameDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await platform.async_reset()
             await runtime.stop()
+
+    async def test_refresh_merges_only_names_and_cannot_recreate_removed_journal_records(self):
+        for removed in (False, True):
+            await self.vault.put(self.key, self.record)
+            records = self.vault.records()
+            if removed:
+                await self.vault.remove(self.key)
+            else:
+                updated = self.vault.record(self.key)
+                updated["target"]["recovery"] = False
+                updated["target"].pop("source")
+                updated["phase"] = "verified"
+                await self.vault.put(self.key, updated)
+            await onboarding.refresh_names(
+                self.hass,
+                records,
+                self.vault,
+                discovered={self.target["accessory_id"]: {"friendly_name": "Test Room"}},
+            )
+            if removed:
+                self.assertNotIn(self.key, self.vault.records())
+                self.assertEqual(records[self.key]["name"], self.record["name"])
+            else:
+                stored = self.vault.record(self.key)
+                self.assertEqual(stored["name"], "Test Room")
+                self.assertFalse(stored["target"]["recovery"])
+                self.assertNotIn("source", stored["target"])
+                self.assertEqual(stored["phase"], "verified")
