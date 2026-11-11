@@ -24,6 +24,31 @@ All notable changes to this project will be documented in this file.
 
 - None
 
+## v1.1.0 - 2026-11-11
+
+### 🚧 Breaking changes
+
+- None
+
+### ✨ New features
+
+- None
+
+### 🐛 Bug fixes
+
+- None
+
+### 🔧 Improvements
+
+- Start sensor monitoring before refreshing HomePod names in the background. Reuse a matching authenticated startup reading once if it is less than 30 seconds old. Later polls authenticate and read the sensors afresh.
+- Try each HomePod's last known address first. If the address is unreachable or belongs to another accessory, try rediscovery and verify the HomePod's pinned identity before using a newly discovered address.
+- Reduce polling overhead by avoiding copies of the credential inventory when saving monitoring state. Continue to write state durably.
+
+### 🔄 Other changes
+
+- Clarify the README's setup and recovery guidance for dedicated HomePod connections and devices transitioned from native HomeKit adoption.
+- Set the integration manifest and project version to `1.1.0`.
+
 ## v1.0.1 - 2026-11-10
 
 ### 🚧 Breaking changes
