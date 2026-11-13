@@ -182,6 +182,23 @@ class ControllerIsolationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["step_id"], "credentials")
             self.assertEqual(self.vault.record(key)["phase"], "transition_required")
 
+    async def test_transition_refuses_a_duplicate_of_a_configured_accessory(self):
+        config, key, _, _ = await self.legacy_inventory(include_owned=False)
+        await integration.async_migrate_entry(self.hass, config)
+        orphan = self.vault.record(key)
+        orphan["target"]["entry_id"] = "unconfigured"
+        orphan["target"]["accessory_id"] = orphan["target"]["accessory_id"].upper()
+        await self.vault.put("unconfigured", orphan)
+        async with self.flow_environment() as backend:
+            flow = self.flow("reconfigure", config)
+            result = await flow.async_step_transition({"devices": ["unconfigured"], "confirm": True})
+            self.assertEqual(result["errors"], {"base": "select_devices"})
+            backend.read_ha.assert_not_awaited()
+            self.hass.config_entries.async_update_entry(config, data={**config.data, "device_keys": []})
+            result = await flow.async_step_transition({"devices": [key, "unconfigured"], "confirm": True})
+            self.assertEqual(result["errors"], {"base": "select_devices"})
+        self.assertEqual(self.vault.record("unconfigured"), orphan)
+
     async def test_transition_cannot_be_bypassed_and_preparation_uses_a_fresh_user_controller(self):
         config, key, legacy, old = await self.legacy_inventory(include_owned=False)
         await integration.async_migrate_entry(self.hass, config)
@@ -211,22 +228,31 @@ class ControllerIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_confirmed_flow_import_creates_new_connection_without_touching_native_identity(self):
         config, key, legacy, _ = await self.legacy_inventory(include_owned=False)
+        record = self.vault.record(key)
+        identifier = legacy["accessory_id"].upper()
+        record["target"]["accessory_id"] = identifier
+        await self.vault.put(key, record)
         await integration.async_migrate_entry(self.hass, config)
         exported = deepcopy(self.export)
-        exported["accessories"][0]["AccessoryPairingID"] = legacy["accessory_id"]
+        exported["accessories"][0]["AccessoryPairingID"] = identifier
+        endpoint = {"AccessoryIP": "192.0.2.2", "AccessoryPort": 12345}
+        found = {identifier.lower(): {"name": "Discovered HomePod", "endpoint": endpoint}}
         async with self.flow_environment():
             flow = self.flow("reconfigure", config)
             await flow.async_step_transition({"devices": [key], "confirm": True})
             with (
-                patch.object(config_flow, "discover_devices", AsyncMock(return_value={})),
+                patch.object(config_flow, "discover_devices", AsyncMock(return_value=found)),
                 patch.object(self.hass.config_entries, "async_schedule_reload"),
             ):
-                await self.finish_flow(
+                result = await self.finish_flow(
                     flow, await flow.async_step_credential_export({"credential_export": json.dumps(exported)})
                 )
+        self.assertEqual(result["reason"], "reconfigure_successful")
         target = self.vault.record(key)["target"]
         self.assertNotEqual(target["ha_id"], legacy["ha_id"])
         self.assertFalse(target["recovery"])
+        self.assertEqual(target["pairing"]["AccessoryPairingID"], identifier)
+        self.assertEqual(target["pairing"]["AccessoryIP"], endpoint["AccessoryIP"])
 
     async def test_transition_failure_stays_visible_without_success_or_native_activity(self):
         config, key, legacy, _ = await self.legacy_inventory(include_owned=False)

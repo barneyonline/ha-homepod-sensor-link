@@ -1,5 +1,6 @@
 """Quality behavior through HA services, entity publication, Repairs and reauth."""
 
+import asyncio
 from copy import deepcopy
 import json
 import unittest
@@ -153,6 +154,127 @@ class QualityLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 flow._task.set_result([self.key])
                 async with self.flow_environment():
                     self.assertEqual((await flow.async_step_finish())["reason"], "verification_failed")
+        finally:
+            await runtime.stop()
+
+    async def test_reauthentication_uses_configured_record_even_with_a_later_pending_duplicate(self):
+        config, runtime = await self.make_runtime()
+        duplicate_key = "unconfigured-device"
+        duplicate = deepcopy(self.vault.record(self.key))
+        duplicate["target"]["entry_id"] = duplicate_key
+        duplicate["target"]["accessory_id"] = duplicate["target"]["accessory_id"].upper()
+        duplicate["phase"] = "prepared"
+        await self.vault.put(duplicate_key, duplicate)
+        try:
+            for error, reason in ((OSError(), "verification_failed"), (None, "reauth_successful")):
+                with self.subTest(reason=reason):
+                    flow = self.flow(config)
+                    async with self.flow_environment() as backend:
+                        backend.read_ha.side_effect = error
+                        await flow.async_step_reauth_confirm({})
+                        result = await self.finish_flow(
+                            flow,
+                            await flow.async_step_credential_export({"credential_export": json.dumps(self.export)}),
+                        )
+                        backend.read_ha.assert_awaited_once()
+                        self.assertEqual(backend.read_ha.await_args.args[0]["entry_id"], self.key)
+                    self.assertEqual(result["reason"], reason)
+                    self.assertEqual(config.data["device_keys"], [self.key])
+                    self.assertEqual(self.vault.record(duplicate_key), duplicate)
+        finally:
+            await runtime.stop()
+
+    async def test_removal_during_reauthentication_does_not_restore_the_removed_record(self):
+        for error in (None, OSError()):
+            with self.subTest(probe_fails=error is not None):
+                config, runtime = await self.make_runtime()
+                started, resume = asyncio.Event(), asyncio.Event()
+
+                async def read(target, *, source):
+                    started.set()
+                    await resume.wait()
+                    if error:
+                        raise error
+                    return {"temperature": 22, "humidity": 45}
+
+                try:
+                    async with self.flow_environment() as backend:
+                        backend.read_ha.side_effect = read
+                        flow = self.flow(config)
+                        await flow.async_step_reauth_confirm({})
+                        progress = await flow.async_step_credential_export(
+                            {"credential_export": json.dumps(self.export)}
+                        )
+                        try:
+                            await asyncio.wait_for(started.wait(), 1)
+                            await runtime.remove_device(self.key)
+                        finally:
+                            resume.set()
+                        result = await self.finish_flow(flow, progress)
+                    self.assertEqual(result["reason"], "verification_failed")
+                    self.assertEqual(config.data["device_keys"], [])
+                    self.assertNotIn(self.key, self.vault.records())
+                finally:
+                    await runtime.stop()
+
+    async def test_reauthentication_does_not_rebind_to_an_orphan_removed_before_import(self):
+        config, runtime = await self.make_runtime()
+        orphan = self.vault.record(self.key)
+        orphan["target"]["entry_id"] = "unconfigured"
+        await self.vault.put("unconfigured", orphan)
+        try:
+            async with self.flow_environment() as backend:
+                flow = self.flow(config)
+                await flow.async_step_reauth_confirm({})
+                await runtime.remove_device(self.key)
+                result = await self.finish_flow(
+                    flow, await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+                )
+                backend.read_ha.assert_not_awaited()
+            self.assertEqual(result["reason"], "verification_failed")
+            self.assertEqual(config.data["device_keys"], [])
+            self.assertEqual(self.vault.records(), {"unconfigured": orphan})
+        finally:
+            await runtime.stop()
+
+    async def test_removal_while_recording_verification_failure_wins(self):
+        config, runtime = await self.make_runtime()
+        put = self.vault.put
+
+        async def remove_before_put(key, record, *, require_existing=False):
+            await runtime.remove_device(key)
+            return await put(key, record, require_existing=require_existing)
+
+        try:
+            async with self.flow_environment() as backend:
+                backend.read_ha.side_effect = OSError()
+                flow = self.flow(config)
+                await flow.async_step_reauth_confirm({})
+                with patch.object(self.vault, "put", side_effect=remove_before_put) as save_failure:
+                    result = await self.finish_flow(
+                        flow, await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+                    )
+                    save_failure.assert_awaited_once()
+            self.assertEqual(result["reason"], "verification_failed")
+            self.assertEqual(config.data["device_keys"], [])
+            self.assertNotIn(self.key, self.vault.records())
+        finally:
+            await runtime.stop()
+
+    async def test_finish_rejects_missing_or_duplicate_device_records(self):
+        config, runtime = await self.make_runtime()
+        duplicate = self.vault.record(self.key)
+        duplicate["target"]["entry_id"] = "duplicate"
+        await self.vault.put("duplicate", duplicate)
+        try:
+            for key in ("missing", "duplicate"):
+                with self.subTest(key=key), patch.object(runtime, "accept_inventory") as accept:
+                    flow = self.flow(config)
+                    flow._task = self.hass.loop.create_future()
+                    flow._task.set_result([key])
+                    async with self.flow_environment():
+                        self.assertEqual((await flow.async_step_finish())["reason"], "verification_failed")
+                    accept.assert_not_called()
         finally:
             await runtime.stop()
 

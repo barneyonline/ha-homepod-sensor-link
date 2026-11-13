@@ -104,6 +104,26 @@ class Vault:
         """Return an isolated device without copying unrelated credentials."""
         return deepcopy(self.data["records"][key])
 
+    def record_for_accessory(
+        self, accessory_id: str, *, preferred_keys: frozenset[str] = frozenset(), required_key: str | None = None
+    ) -> Record | None:
+        """Copy a configured match if available, otherwise copy the last matching record."""
+        identifier = accessory_id.lower()
+        records = cast(dict[str, Record], self.data["records"])
+        if required_key is not None:
+            record = records.get(required_key)
+            if record is not None and record["target"]["accessory_id"].lower() == identifier:
+                return deepcopy(record)
+            return None
+        match = None
+        for key, record in reversed(records.items()):
+            if record["target"]["accessory_id"].lower() == identifier:
+                if key in preferred_keys:
+                    return deepcopy(record)
+                if match is None:
+                    match = record
+        return deepcopy(match)
+
     async def _commit(self, data: Data) -> None:
         # Drain atomic I/O even when the caller is cancelled. Otherwise a
         # cancelled worker could recreate credentials after removal purges them.
@@ -116,13 +136,16 @@ class Vault:
             raise
         self.data = data
 
-    async def put(self, key: str, record: Record) -> None:
+    async def put(self, key: str, record: Record, *, require_existing: bool = False) -> bool:
         async with self.lock:
+            if require_existing and key not in self.data["records"]:
+                return False
             data = deepcopy(self.data)
             data["records"][key] = deepcopy(record)
             if len(data["records"]) > 64:
                 raise SafetyFailure("inventory_capacity")
             await self._commit(data)
+            return True
 
     async def remove(self, key: str) -> None:
         async with self.lock:

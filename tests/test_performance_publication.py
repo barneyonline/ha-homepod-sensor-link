@@ -73,7 +73,7 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                         with patch.object(runtime.engine, "snapshot", wraps=runtime.engine.snapshot) as snapshot:
                             for target in runtime.targets:
                                 start = len(reports)
-                                runtime.publish(target, {"temperature": 22, "humidity": 46})
+                                runtime.publish(target, {"temperature": 21, "humidity": 45})
                                 self.assertEqual(reports[start:], [target["entry_id"]] * 2)
                                 await runtime.verify_publication(target)
                             snapshot.assert_not_called()

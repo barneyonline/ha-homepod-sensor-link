@@ -19,7 +19,7 @@ class SetupOperationTests(unittest.IsolatedAsyncioTestCase):
     flow_environment = fixtures.OnboardingTests.flow_environment
     make_runtime = fixtures.OnboardingTests.make_runtime
 
-    async def test_reusing_prepared_devices_copies_inventory_only_for_provisioning(self):
+    async def test_reusing_prepared_devices_copies_only_each_selected_record(self):
         for count in (1, 16, 64):
             with self.subTest(devices=count):
                 copies = []
@@ -47,14 +47,30 @@ class SetupOperationTests(unittest.IsolatedAsyncioTestCase):
                     with patch.object(self.vault, "records", wraps=self.vault.records) as records:
                         results = await flow._prepare()
                 self.assertEqual(results, list(self.vault.data["records"]))
-                # Provisioning needs one isolated inventory per selected device.
-                # Unused new-key tracking previously doubled this work.
-                self.assertEqual(records.call_count, count)
-                self.assertEqual(len(copies), count * count)
+                records.assert_not_called()
+                self.assertEqual(copies, results)
                 self.assertIsNone(flow._imported)
                 backend.read_ha.assert_not_awaited()
                 backend.inspect_recovery.assert_not_awaited()
                 backend.restore_missing.assert_not_awaited()
+
+    async def test_accessory_lookup_returns_last_matching_record_in_isolation(self):
+        first = {"target": {"entry_id": "first", "accessory_id": "synthetic"}, "phase": "needs_credentials"}
+        last = {
+            "target": {"entry_id": "last", "accessory_id": "SYNTHETIC", "pairing": {"metadata": ["fixture"]}},
+            "phase": "prepared",
+        }
+        await self.vault.put("first", first)
+        self.assertEqual(self.vault.record_for_accessory("Synthetic"), first)
+        await self.vault.put("last", last)
+        self.assertIsNone(self.vault.record_for_accessory("missing"))
+        matched = self.vault.record_for_accessory("Synthetic")
+        self.assertEqual(matched, last)
+        matched["target"]["pairing"]["metadata"].clear()
+        self.assertEqual(self.vault.record("last"), last)
+        self.assertEqual(self.vault.record_for_accessory("Synthetic", preferred_keys=frozenset({"first"})), first)
+        await self.vault.remove("last")
+        self.assertEqual(self.vault.record_for_accessory("Synthetic"), first)
 
     async def test_active_and_unloaded_removal_commit_credentials_and_state_once(self):
         for active in (True, False):
