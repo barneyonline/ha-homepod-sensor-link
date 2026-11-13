@@ -58,12 +58,15 @@ async def prepare(
     flow_id: str | None = None,
     force_validate: bool = False,
     transition_confirmed: bool = False,
+    preferred_keys: frozenset[str] = frozenset(),
+    required_key: str | None = None,
 ) -> list[str]:
     """Only read-only probes here. Commit each device independently before writes."""
     results = []
-    existing = {r["target"]["accessory_id"].lower(): r for r in vault.records().values()}
     for identifier in selected:
-        previous = existing.get(identifier)
+        previous = vault.record_for_accessory(identifier, preferred_keys=preferred_keys, required_key=required_key)
+        if required_key is not None and previous is None:
+            continue
         transitioning = previous is not None and previous["phase"] == "transition_required"
         if transitioning and not transition_confirmed:
             raise SafetyFailure("explicit_transition_required")
@@ -79,10 +82,10 @@ async def prepare(
         if previous and "ha_key" in previous["target"]:
             target = previous["target"]
         else:
-            public = imported.get("accessories", {}).get(identifier)
+            public = imported.get("accessories", {}).get(identifier.lower())
             if not public:
                 raise SafetyFailure("accessory_pin_required")
-            raw_id = imported.get("accessory_identifiers", {}).get(identifier, identifier)
+            raw_id = imported.get("accessory_identifiers", {}).get(identifier.lower(), identifier)
             target = make_owned(raw_id, public, discovered[identifier].get("endpoint", {}))
         if previous and "ha_key" not in previous["target"]:
             target["entry_id"] = previous["target"]["entry_id"]
@@ -129,8 +132,8 @@ async def prepare(
             record.pop("authorised_boot", None)
         if record["phase"] == "prepared":
             record["authorised_boot"] = boot_id(hass)
-        await vault.put(target["entry_id"], record)
-        results.append(target["entry_id"])
+        if await vault.put(target["entry_id"], record, require_existing=required_key is not None):
+            results.append(target["entry_id"])
     return results
 
 
@@ -147,6 +150,7 @@ class Provisioner:
         target = record["target"]
         if record["phase"] in ("needs_credentials", "blocked", "transition_required"):
             return record, None
+        previous = deepcopy(record) if not resume and record.get("error") == "device_unreachable" else None
         # Following restart, only a fresh read with the existing dedicated key
         # is automatic. Any further pairing write needs explicit Resume.
         try:
@@ -159,7 +163,8 @@ class Provisioner:
             return record, None
         except Exception:
             record["error"] = "device_unreachable"
-            await self.vault.put(key, record)
+            if record != previous:
+                await self.vault.put(key, record)
             return record, None
         else:
             record.update(phase="verified", error=None)

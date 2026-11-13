@@ -300,6 +300,17 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 keys = await flow._prepare()
             self.assertEqual(keys, [self.key])  # previous immutable journal wins
 
+    async def test_device_picker_keeps_active_accessory_hidden_when_a_pending_duplicate_exists(self):
+        active = deepcopy(self.record)
+        active["phase"] = "active"
+        await self.vault.put(self.key, active)
+        duplicate = deepcopy(self.record)
+        duplicate["target"]["entry_id"] = "unconfigured"
+        duplicate["target"]["accessory_id"] = duplicate["target"]["accessory_id"].upper()
+        await self.vault.put("unconfigured", duplicate)
+        async with self.flow_environment():
+            self.assertEqual((await self.flow().async_step_devices())["step_id"], "no_devices")
+
     async def test_controller_start_failure_and_empty_finish_are_safe(self):
         @asynccontextmanager
         async def broken(hass):

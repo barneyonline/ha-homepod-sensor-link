@@ -16,6 +16,7 @@ from custom_components.homepod_sensor_link import coordinator
 from custom_components.homepod_sensor_link import watchdog as watchdog_module
 from custom_components.homepod_sensor_link.credentials import DOMAIN
 from custom_components.homepod_sensor_link.engine import DeviceState, SafetyFailure
+from custom_components.homepod_sensor_link.provisioning import make_owned
 from custom_components.homepod_sensor_link.sensor import RecoveryStatus
 from custom_components.homepod_sensor_link.watchdog import HeartbeatWatchdog, ISSUE_ID
 import test_onboarding_v2 as fixtures
@@ -58,13 +59,15 @@ class WatchdogTests(unittest.IsolatedAsyncioTestCase):
         self.watchdog.check()
         self.assertIsNone(self.issue())
         self.now = 900
-        self.watchdog.completed("first")
-        self.assertEqual(self.watchdog.reported, {"second"})
+        self.watchdog.check()
+        self.assertEqual(self.watchdog.reported, {"first", "second"})
         self.assertEqual(self.issue().config_entry_id, self.config.entry_id)
         self.assertEqual(self.issue().severity, ir.IssueSeverity.WARNING)
+        self.watchdog.completed("first")
+        self.assertEqual(self.watchdog.reported, {"second"})
         self.assertIn("1 HomePod.", self.create.call_args.args[1])
         self.watchdog.check()
-        self.create.assert_called_once()
+        self.assertEqual(self.create.call_count, 2)
         self.watchdog.completed("second")
         self.assertIsNone(self.issue())
         self.dismiss.assert_called_with(self.hass, self.watchdog.notification_id)
@@ -95,7 +98,8 @@ class WatchdogTests(unittest.IsolatedAsyncioTestCase):
         self.watchdog.check()
         self.assertIsNotNone(self.issue())
         self.active = False
-        self.watchdog.check()
+        self.watchdog.completed("untracked")
+        self.create.assert_called_once()
         self.assertEqual(self.watchdog.progress, {})
         self.assertIsNone(self.issue())
         self.now = 10000
@@ -107,6 +111,18 @@ class WatchdogTests(unittest.IsolatedAsyncioTestCase):
         self.now += 1
         self.watchdog.check()
         self.assertIsNotNone(self.issue())
+
+    async def test_completion_during_pause_resets_grace_before_an_alert_exists(self):
+        self.now = 899
+        self.active = False
+        self.watchdog.completed("first")
+        self.assertEqual(self.watchdog.progress, {})
+        self.create.assert_not_called()
+        self.active = True
+        self.now = 900
+        self.watchdog.check()
+        self.assertEqual(self.watchdog.progress, {"first": 900, "second": 900})
+        self.assertIsNone(self.issue())
 
     async def test_timer_is_independent_idempotent_and_cancelled_on_stop(self):
         self.watchdog.start()
@@ -158,6 +174,32 @@ class RuntimeWatchdogTests(unittest.IsolatedAsyncioTestCase):
 
     def issue(self):
         return ir.async_get(self.hass).async_get_issue(DOMAIN, ISSUE_ID)
+
+    async def test_poll_reconciles_inventory_twice_at_each_device_count(self):
+        runtime = self.runtime
+        runtime.records[self.key]["target"]["recovery"] = False
+        self.watchdog.start()
+        for count in (1, 16, 64):
+            with self.subTest(devices=count):
+                for index in range(len(runtime.records), count):
+                    target = make_owned(f"synthetic-{index}", self.target["accessory_key"], {})
+                    target["recovery"] = False
+                    runtime.records[target["entry_id"]] = {"target": target, "phase": "active"}
+                runtime.sync_targets()
+                self.backend.read_ha.reset_mock()
+                self.now[0] += 300
+                with patch.object(self.watchdog, "devices", wraps=self.watchdog.devices) as inventory:
+                    await runtime.update()
+                    self.assertEqual(inventory.call_count, 2)
+                self.assertEqual(self.backend.read_ha.await_count, count)
+                self.assertEqual(self.watchdog.progress, dict.fromkeys(runtime.records, self.now[0]))
+
+    async def test_poll_reconciles_devices_blocked_during_checks(self):
+        self.watchdog.start()
+        self.backend.read_ha.side_effect = SafetyFailure()
+        await self.runtime.update()
+        self.assertTrue(self.runtime.engine.states[self.key].blocked)
+        self.assertNotIn(self.key, self.watchdog.progress)
 
     async def test_real_timer_alerts_while_device_check_is_hung_and_clears_on_completion(self):
         entered, release, alerted = asyncio.Event(), asyncio.Event(), asyncio.Event()
@@ -271,7 +313,7 @@ class RuntimeWatchdogTests(unittest.IsolatedAsyncioTestCase):
             self.watchdog.check()
         with patch.object(coordinator, "conflicting_recovery", return_value=True):
             self.now[0] = 900
-            self.watchdog.check()
+            await self.runtime.update()
             self.assertIsNone(self.issue())
             self.assertEqual(self.watchdog.progress, {})
         self.watchdog.check()

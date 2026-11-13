@@ -373,6 +373,7 @@ class Runtime:
 
     async def _update(self) -> Snapshot:
         if conflicting_recovery(self.hass):
+            self.watchdog.check()
             for state in self.engine.states.values():
                 state.status, state.reason = "paused", "competing_recovery"
                 state.auth_failures, state.auth_since = 0, None
@@ -390,6 +391,7 @@ class Runtime:
                                 group.create_task(self.inspect_pending(key))
                     self.sync_targets()
             await self.engine.check_all()
+            self.watchdog.check()
             await self.audit.check()
             if self.vault:
                 for key, record in list(self.records.items()):

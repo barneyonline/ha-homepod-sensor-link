@@ -435,15 +435,18 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         flow = HomePodSensorLinkFlow()
         flow.hass, flow.context, flow.flow_id, flow.handler = self.hass, {"source": "user"}, "partial", DOMAIN
         good, bad = self.target["accessory_id"], "unexported-device"
-        async with self.flow_environment():
+        async with self.flow_environment() as backend:
             await flow.async_step_user()
             flow._discovered[bad] = {
                 "name": "Unexported candidate",
                 "endpoint": {"AccessoryIP": "192.0.2.2", "AccessoryPort": 12345},
             }
-            flow._selected, flow._recovery_ids = [good, bad], [good, bad]
+            flow._selected, flow._recovery_ids = [bad, good], [bad, good]
             flow._imported = parse_export(json.dumps(self.export))
             result = await self.finish_flow(flow, await flow._begin())
+            backend.inspect_recovery.assert_awaited_once()
+            backend.read_ha.assert_awaited_once()
+            self.assertTrue(backend.read_ha.await_args.kwargs["source"])
         self.assertEqual(len(result["data"]["device_keys"]), 2)
         records = self.vault.records()
         self.assertEqual({r["phase"] for r in records.values()}, {"prepared", "needs_credentials"})

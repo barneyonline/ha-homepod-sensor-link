@@ -78,6 +78,35 @@ class DirectedFlowTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
     flow = flow_fixtures.FlowLifecycleTests.flow
     flow_environment = fixtures.OnboardingTests.flow_environment
+    make_runtime = fixtures.OnboardingTests.make_runtime
+
+    async def test_managed_import_with_hints_keeps_the_selected_device_and_policy(self):
+        config, runtime = await self.make_runtime(recovery=False)
+        identifier = self.target["accessory_id"]
+        runtime.records[self.key]["phase"] = "needs_credentials"
+        found = {
+            identifier: {"name": "Selected HomePod", "endpoint": {"AccessoryIP": "192.0.2.1"}},
+            "other": {"name": "Other HomePod"},
+        }
+        try:
+            async with self.flow_environment():
+                flow = self.flow("reconfigure", config)
+                await flow.async_step_manage({"device": self.key})
+                await flow.async_step_manage_resume({})
+                with (
+                    patch.object(config_flow, "discover_devices", AsyncMock(return_value=found)) as discover,
+                    patch.object(flow, "_begin", AsyncMock(return_value={"step_id": "verify"})),
+                ):
+                    result = await flow.async_step_credential_export(
+                        {"credential_export": json.dumps(pairing_dictionary())}
+                    )
+                self.assertEqual(result["step_id"], "verify")
+                discover.assert_awaited_once_with(self.hass, hosts=["192.0.2.1"])
+                self.assertEqual(flow._selected, [identifier])
+                self.assertEqual(flow._recovery_ids, [])
+                self.assertEqual(flow._discovered[identifier], found[identifier])
+        finally:
+            await runtime.stop()
 
     async def test_empty_search_can_retry_with_same_export_or_import_corrected_hints(self):
         manager = self.hass.config_entries.flow

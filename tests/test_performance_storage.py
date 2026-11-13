@@ -12,7 +12,9 @@ from homeassistant.core import HomeAssistant
 from custom_components.homepod_sensor_link import vault as vault_module
 from custom_components.homepod_sensor_link.audit import AUDIT_INTERVAL, AUDIT_RETRY, RecoveryAudit
 from custom_components.homepod_sensor_link.engine import INTERVAL, RecoveryEngine, SafetyFailure
+from custom_components.homepod_sensor_link.provisioning import make_owned
 from custom_components.homepod_sensor_link.vault import DATA_FILE, Vault
+import test_onboarding_v2 as fixtures
 
 
 class AuditOperationTests(unittest.IsolatedAsyncioTestCase):
@@ -185,3 +187,76 @@ class ProtectedStorageOperationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(copies), set(self.vault.data["records"]))
         with self.assertRaises(KeyError):
             self.vault.record("missing")
+
+
+class PendingStorageOperationTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp = fixtures.OnboardingTests.asyncSetUp
+    asyncTearDown = fixtures.OnboardingTests.asyncTearDown
+    make_runtime = fixtures.OnboardingTests.make_runtime
+
+    async def test_unchanged_unreachable_polls_commit_only_the_normal_journal(self):
+        for count in (1, 16, 64):
+            with self.subTest(devices=count):
+                _, runtime = await self.make_runtime(recovery=False)
+                try:
+                    records = {}
+                    for index in range(count):
+                        target = make_owned(f"synthetic-{index}", self.target["accessory_key"], {})
+                        target["recovery"] = False
+                        records[target["entry_id"]] = {
+                            "target": target,
+                            "phase": "prepared",
+                            "error": "device_unreachable",
+                        }
+                    self.vault.data["records"] = deepcopy(records)
+                    await self.vault.save_states({})
+                    runtime.records = records
+                    runtime.engine.states.clear()
+                    runtime.saved.clear()
+                    runtime.sync_targets()
+                    self.backend.read_ha.side_effect = OSError()
+                    for _ in range(2):
+                        self.backend.read_ha.reset_mock()
+                        with (
+                            patch.object(self.vault, "put", wraps=self.vault.put) as put,
+                            patch.object(vault_module, "_write", wraps=vault_module._write) as write,
+                            patch.object(vault_module.os, "fsync", wraps=vault_module.os.fsync) as fsync,
+                        ):
+                            await runtime.update()
+                            self.assertEqual(self.backend.read_ha.await_count, count)
+                            put.assert_not_awaited()
+                            write.assert_called_once()
+                            self.assertEqual(fsync.call_count, 2)
+                        self.assertEqual((await Vault(self.hass).load()).records(), records)
+                    self.backend.restore_missing.assert_not_awaited()
+                finally:
+                    await runtime.stop()
+
+    async def test_first_failure_changed_endpoint_and_explicit_resume_commit(self):
+        await self.vault.put(self.key, self.record)
+        self.backend.read_ha.side_effect = OSError()
+        with patch.object(self.vault, "put", wraps=self.vault.put) as put:
+            await self.provisioner.inspect(self.key)
+            put.assert_awaited_once()
+        self.assertEqual(self.vault.record(self.key)["error"], "device_unreachable")
+
+        async def moved_then_failed(target):
+            target["pairing"]["AccessoryIP"] = "192.0.2.2"
+            raise OSError()
+
+        self.backend.read_ha.side_effect = moved_then_failed
+        with patch.object(self.vault, "put", wraps=self.vault.put) as put:
+            await self.provisioner.inspect(self.key)
+            put.assert_awaited_once()
+        reloaded = await Vault(self.hass).load()
+        self.assertEqual(reloaded.record(self.key)["target"]["pairing"]["AccessoryIP"], "192.0.2.2")
+
+        paused = reloaded.record(self.key)
+        paused["cancelled"] = True
+        await self.vault.put(self.key, paused)
+        self.backend.read_ha.side_effect = OSError()
+        with patch.object(self.vault, "put", wraps=self.vault.put) as put:
+            await self.provisioner.inspect(self.key, resume=True)
+            put.assert_awaited_once()
+        self.assertFalse((await Vault(self.hass).load()).record(self.key)["cancelled"])
+        self.backend.restore_missing.assert_not_awaited()
