@@ -24,6 +24,29 @@ All notable changes to this project will be documented in this file.
 
 - None
 
+## v1.1.1 - 2026-11-13
+
+### 🚧 Breaking changes
+
+- None
+
+### ✨ New features
+
+- None
+
+### 🐛 Bug fixes
+
+- Keep credential updates and native-device transitions tied to the selected HomePod record. Ignore duplicate setup records for configured devices and prevent an in-progress credential update from recreating a removed device.
+
+### 🔧 Improvements
+
+- Reduce monitoring overhead by updating heartbeat progress one HomePod at a time and checking for stalled devices across the inventory once per poll, alongside the independent watchdog timer.
+- Copy only the matching credential record during provisioning, and avoid rewriting the setup journal when repeated checks find the same HomePod still unreachable.
+
+### 🔄 Other changes
+
+- Set the integration manifest and project version to `1.1.1`.
+
 ## v1.1.0 - 2026-11-11
 
 ### 🚧 Breaking changes
