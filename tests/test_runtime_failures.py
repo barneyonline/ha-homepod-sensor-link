@@ -7,12 +7,20 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from homeassistant.components import persistent_notification
+from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.util import dt as dt_util
 
 from custom_components import homepod_sensor_link as integration
 from custom_components.homepod_sensor_link import coordinator as runtime_module
-from custom_components.homepod_sensor_link.engine import DeviceState, SafetyFailure
+from custom_components.homepod_sensor_link.engine import (
+    COOLDOWN,
+    GRACE,
+    AuthenticationFailure,
+    DeviceState,
+    SafetyFailure,
+)
 from custom_components.homepod_sensor_link.credentials import DOMAIN, public_targets
 from custom_components.homepod_sensor_link.vault import Vault
 import test_onboarding_v2 as fixtures
@@ -246,9 +254,52 @@ class RuntimeFailureTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
-    async def test_notifications_deduplicate_and_never_include_identity_or_raw_error(self):
-        config, runtime = await self.make_runtime()
+    async def test_failed_automatic_repair_alerts_and_successful_retry_clears_it_silently(self):
+        _, runtime = await self.make_runtime()
+        engine = runtime.engine
+        failure_id = f"{DOMAIN}_{self.key}"
+        updates = []
+
+        @callback
+        def record_update(update_type, notifications):
+            updates.extend((update_type, notification_id) for notification_id in notifications)
+
+        unsubscribe = persistent_notification.async_register_callback(self.hass, record_update)
+        try:
+            self.backend.restore_missing.side_effect = [OSError(), True]
+            with (
+                patch.object(engine, "clock") as clock,
+                patch.object(engine, "refresh_publication", AsyncMock()),
+                patch.object(engine, "verify_publication", AsyncMock()),
+            ):
+                for elapsed in (0, GRACE / 2, GRACE):
+                    clock.return_value = engine.started + elapsed
+                    await engine.check_all()
+                await self.hass.async_block_till_done()
+                self.assertEqual(engine.states[self.key].status, "repair_failed")
+                self.assertEqual(updates, [(persistent_notification.UpdateType.ADDED, failure_id)])
+
+                self.backend.read_ha.side_effect = [AuthenticationFailure(), {"temperature": 20, "humidity": 40}]
+                clock.return_value += COOLDOWN
+                await engine.check_all()
+                await self.hass.async_block_till_done()
+                self.assertEqual(engine.states[self.key].status, "healthy")
+                self.assertEqual(engine.states[self.key].repairs, 1)
+                self.assertEqual(
+                    updates,
+                    [
+                        (persistent_notification.UpdateType.ADDED, failure_id),
+                        (persistent_notification.UpdateType.REMOVED, failure_id),
+                    ],
+                )
+        finally:
+            unsubscribe()
+            await runtime.stop()
+
+    async def test_failure_notifications_deduplicate_and_clear_without_a_success_alert(self):
+        _, runtime = await self.make_runtime()
         state = DeviceState(status="blocked", blocked=True, reason="identity_validation_failed")
+        failure_id = f"{DOMAIN}_{self.key}"
         try:
             with (
                 patch.object(runtime_module.persistent_notification, "async_create") as create,
@@ -256,20 +307,21 @@ class RuntimeFailureTests(unittest.IsolatedAsyncioTestCase):
             ):
                 await runtime.notify(self.target, state, False)
                 await runtime.notify(self.target, state, False)
-                self.assertEqual(create.call_count, 1)
+                create.assert_called_once()
+                self.assertEqual(create.call_args.kwargs["title"], "HomePod recovery needs attention")
+                self.assertEqual(create.call_args.kwargs["notification_id"], failure_id)
                 self.assertNotIn(self.target["ha_id"], str(create.call_args))
                 state.status, state.last_repair, state.last_verified, state.repairs = "healthy", 1, 1, 1
                 await runtime.notify(self.target, state, True)
-                self.assertEqual(create.call_count, 2)
-                state.status, state.last_repair = "starting", None
-                await runtime.notify(self.target, state, True)
-                self.assertEqual(create.call_count, 2)
+                create.assert_called_once()
+                dismiss.assert_called_once_with(self.hass, failure_id)
                 state.recovery_status = "unreachable"
                 await runtime.notify_access(self.target, state, False)
                 await runtime.notify_access(self.target, state, False)
-                self.assertEqual(create.call_count, 3)
+                self.assertEqual(create.call_count, 2)
                 state.recovery_status = "verified"
                 await runtime.notify_access(self.target, state, True)
-                self.assertEqual(dismiss.call_count, 3)
+                self.assertEqual(dismiss.call_count, 2)
+                dismiss.assert_called_with(self.hass, f"{DOMAIN}_access_{self.key}")
         finally:
             await runtime.stop()
