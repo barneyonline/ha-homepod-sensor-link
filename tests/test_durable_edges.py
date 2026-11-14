@@ -40,7 +40,10 @@ class DurableEdgeTests(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             purge = asyncio.create_task(self.vault.purge())
             await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
             self.assertFalse(purge.done())
+            self.assertFalse(task.done())
             release.set()
             with self.assertRaises(asyncio.CancelledError):
                 await task
@@ -63,6 +66,10 @@ class DurableEdgeTests(unittest.IsolatedAsyncioTestCase):
             while not entered.is_set():
                 await asyncio.sleep(0)
             task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(task.done())
             release.set()
             with self.assertRaises(asyncio.CancelledError):
                 await task

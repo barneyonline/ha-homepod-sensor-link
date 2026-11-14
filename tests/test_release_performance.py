@@ -23,6 +23,12 @@ class SetupOperationTests(unittest.IsolatedAsyncioTestCase):
         for count in (1, 16, 64):
             with self.subTest(devices=count):
                 copies = []
+                inspected = []
+
+                class CountedId(str):
+                    def lower(self):
+                        inspected.append(self)
+                        return super().lower()
 
                 class CountedRecord(dict):
                     def __deepcopy__(self, memo):
@@ -31,7 +37,7 @@ class SetupOperationTests(unittest.IsolatedAsyncioTestCase):
 
                 self.vault.data["records"] = {
                     f"disposable-{index}": CountedRecord(
-                        target={"entry_id": f"disposable-{index}", "accessory_id": f"accessory-{index}"},
+                        target={"entry_id": f"disposable-{index}", "accessory_id": CountedId(f"accessory-{index}")},
                         phase="prepared",
                     )
                     for index in range(count)
@@ -49,6 +55,7 @@ class SetupOperationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(results, list(self.vault.data["records"]))
                 records.assert_not_called()
                 self.assertEqual(copies, results)
+                self.assertEqual(inspected, flow._selected)
                 self.assertIsNone(flow._imported)
                 backend.read_ha.assert_not_awaited()
                 backend.inspect_recovery.assert_not_awaited()
@@ -71,6 +78,29 @@ class SetupOperationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.vault.record_for_accessory("Synthetic", preferred_keys=frozenset({"first"})), first)
         await self.vault.remove("last")
         self.assertEqual(self.vault.record_for_accessory("Synthetic"), first)
+        moved = {**first, "target": {**first["target"], "accessory_id": "different"}}
+        await self.vault.put("first", moved)
+        self.assertIsNone(self.vault.record_for_accessory("Synthetic"))
+        self.assertEqual(self.vault.record_for_accessory("different"), moved)
+        await self.vault.purge()
+        self.assertIsNone(self.vault.record_for_accessory("different"))
+
+    async def test_accessory_lookups_reuse_the_index_across_new_record_commits(self):
+        inspected = []
+
+        class CountedId(str):
+            def lower(self):
+                inspected.append(self)
+                return super().lower()
+
+        for index in range(16):
+            identifier = f"accessory-{index}"
+            self.assertIsNone(self.vault.record_for_accessory(identifier))
+            key = f"disposable-{index}"
+            record = {"target": {"entry_id": key, "accessory_id": CountedId(identifier)}, "phase": "prepared"}
+            await self.vault.put(key, record)
+            self.assertEqual(self.vault.record_for_accessory(identifier), record)
+        self.assertEqual(inspected, [f"accessory-{index}" for index in range(16)])
 
     async def test_active_and_unloaded_removal_commit_credentials_and_state_once(self):
         for active in (True, False):

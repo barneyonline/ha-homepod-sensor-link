@@ -80,6 +80,7 @@ class Vault:
         self.hass = hass
         self.lock = asyncio.Lock()
         self._data: Data | None = None
+        self._accessory_index: tuple[dict[str, Record], dict[str, list[str]]] | None = None
 
     @property
     def data(self) -> Data:
@@ -89,6 +90,8 @@ class Vault:
 
     @data.setter
     def data(self, value: Data) -> None:
+        if self._accessory_index is not None and self._accessory_index[0] is not value["records"]:
+            self._accessory_index = None
         self._data = value
 
     async def load(self) -> Vault:
@@ -115,26 +118,38 @@ class Vault:
             if record is not None and record["target"]["accessory_id"].lower() == identifier:
                 return deepcopy(record)
             return None
-        match = None
-        for key, record in reversed(records.items()):
-            if record["target"]["accessory_id"].lower() == identifier:
-                if key in preferred_keys:
-                    return deepcopy(record)
-                if match is None:
-                    match = record
-        return deepcopy(match)
+        if self._accessory_index is None or self._accessory_index[0] is not records:
+            index: dict[str, list[str]] = {}
+            for key, record in records.items():
+                index.setdefault(record["target"]["accessory_id"].lower(), []).append(key)
+            self._accessory_index = (records, index)
+        keys = self._accessory_index[1].get(identifier)
+        if keys is None:
+            return None
+        key = next((key for key in reversed(keys) if key in preferred_keys), keys[-1])
+        return deepcopy(records[key])
 
-    async def _commit(self, data: Data) -> None:
-        # Drain atomic I/O even when the caller is cancelled. Otherwise a
-        # cancelled worker could recreate credentials after removal purges them.
-        task = asyncio.ensure_future(self.hass.async_add_executor_job(_write, self.hass.config.config_dir, data))
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            await task
-            self.data = data
-            raise
+    async def _finish_io(
+        self, task: asyncio.Future[None], data: Data, index: dict[str, list[str]] | None = None
+    ) -> None:
+        # Repeated cancellations must not release the vault lock while an
+        # executor worker can still change the file.
+        cancelled = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+        task.result()
         self.data = data
+        if index is not None:
+            self._accessory_index = (data["records"], index)
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _commit(self, data: Data, index: dict[str, list[str]] | None = None) -> None:
+        task = self.hass.async_add_executor_job(_write, self.hass.config.config_dir, data)
+        await self._finish_io(task, data, index)
 
     async def put(self, key: str, record: Record, *, require_existing: bool = False) -> bool:
         async with self.lock:
@@ -144,8 +159,20 @@ class Vault:
             data["records"][key] = deepcopy(record)
             if len(data["records"]) > 64:
                 raise SafetyFailure("inventory_capacity")
-            await self._commit(data)
+            index = self._index_after_put(key, record)
+            await self._commit(data, index)
             return True
+
+    def _index_after_put(self, key: str, record: Record) -> dict[str, list[str]] | None:
+        records = self.data["records"]
+        if self._accessory_index is None or self._accessory_index[0] is not records:
+            return None
+        index = self._accessory_index[1]
+        identifier = record["target"]["accessory_id"].lower()
+        if key in records:
+            # A changed ID may need a different position in its new bucket.
+            return index if key in index.get(identifier, ()) else None
+        return {**index, identifier: [*index.get(identifier, ()), key]}
 
     async def remove(self, key: str) -> None:
         async with self.lock:
@@ -219,14 +246,8 @@ class Vault:
                 except OSError:
                     pass
 
-            task = asyncio.ensure_future(self.hass.async_add_executor_job(delete))
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError:
-                await task
-                self.data = {"version": 2, "records": {}, "states": {}}
-                raise
-            self.data = {"version": 2, "records": {}, "states": {}}
+            task = self.hass.async_add_executor_job(delete)
+            await self._finish_io(task, {"version": 2, "records": {}, "states": {}})
 
 
 async def get_vault(hass: HomeAssistant) -> Vault:

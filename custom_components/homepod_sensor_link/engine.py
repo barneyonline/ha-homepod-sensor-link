@@ -175,24 +175,30 @@ class RecoveryEngine:
     def snapshot(self) -> Snapshot:
         return {key: value.public() for key, value in self.states.items()}
 
-    async def check_all(self) -> None:
-        if self.lock.locked():
+    async def check_all(self, check_devices: Callable[[], Awaitable[None]] | None = None) -> None:
+        if check_devices is None and self.lock.locked():
             return
         async with self.lock:
             if not self.is_active():
                 return
-
-            async def check(target: Target) -> None:
-                if self.is_active():
-                    await self._check(target)
-                    key = target["entry_id"]
-                    self.states[key].last_completed = self.clock()
-                    self.check_completed(key)
-
-            async with asyncio.TaskGroup() as group:
-                for target in self.targets:
-                    group.create_task(check(target))
+            if check_devices is None:
+                await self.check_targets(self.targets)
+            else:
+                await check_devices()
             await self.save(self.snapshot())
+
+    async def check_targets(self, targets: list[Target]) -> None:
+        async with asyncio.TaskGroup() as group:
+            for target in targets:
+                group.create_task(self.check_target(target))
+
+    async def check_target(self, target: Target) -> None:
+        """Run a fresh check while the caller holds the engine lock."""
+        if self.is_active():
+            await self._check(target)
+            key = target["entry_id"]
+            self.states[key].last_completed = self.clock()
+            self.check_completed(key)
 
     async def _check(self, target: Target) -> None:
         state = self.states[target["entry_id"]]

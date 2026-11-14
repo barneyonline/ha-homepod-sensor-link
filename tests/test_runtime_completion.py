@@ -6,11 +6,13 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components import homepod_sensor_link as integration
 from custom_components.homepod_sensor_link import coordinator
 from custom_components.homepod_sensor_link.credentials import DOMAIN
-from custom_components.homepod_sensor_link.engine import SafetyFailure
+from custom_components.homepod_sensor_link.engine import AuthenticationFailure, SafetyFailure
+from custom_components.homepod_sensor_link.provisioning import make_owned
 import test_onboarding_v2 as fixtures
 from test_boundary_failures import native_config
 
@@ -19,6 +21,149 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
     make_runtime = fixtures.OnboardingTests.make_runtime
+
+    async def test_active_sample_publishes_while_pending_read_waits(self):
+        _, runtime = await self.make_runtime(recovery=False)
+        active = runtime.records[self.key]
+        active["phase"] = "active"
+        pending = make_owned("synthetic-pending", self.target["accessory_key"], {})
+        pending["recovery"] = False
+        pending_key = pending["entry_id"]
+        record = {"target": pending, "phase": "prepared"}
+        await self.vault.put(self.key, active)
+        await self.vault.put(pending_key, record)
+        runtime.records[pending_key] = record
+        runtime.sync_targets()
+        pending_started, release, published = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        runtime.listen_measurements(self.key, published.set)
+        runtime.engine.verify_publication = AsyncMock()
+
+        async def read(target):
+            if target["entry_id"] == pending_key:
+                pending_started.set()
+                await release.wait()
+                raise OSError()
+            await pending_started.wait()
+            return {"temperature": 21, "humidity": 45}
+
+        self.backend.read_ha.side_effect = read
+        poll = asyncio.create_task(runtime.update())
+        try:
+            await asyncio.wait_for(published.wait(), 2)
+            self.assertFalse(poll.done())
+            self.assertTrue(runtime.engine.lock.locked())
+            self.assertEqual(runtime.readings[self.key][1]["temperature"], 21)
+            release.set()
+            await asyncio.wait_for(poll, 2)
+            self.assertEqual(self.backend.read_ha.await_count, 2)
+            self.assertEqual(runtime.pending_tasks, {})
+            self.assertEqual((await runtime.store.async_load())[self.key]["status"], "healthy")
+        finally:
+            release.set()
+            await asyncio.gather(poll, return_exceptions=True)
+            await runtime.stop()
+
+    async def test_pending_journal_failure_does_not_interrupt_reserved_active_repair(self):
+        _, runtime = await self.make_runtime()
+        active = runtime.records[self.key]
+        active["phase"] = "active"
+        await self.vault.put(self.key, active)
+        pending = make_owned("synthetic-pending", self.target["accessory_key"], {})
+        key = pending["entry_id"]
+        record = {"target": pending, "phase": "prepared"}
+        await self.vault.put(key, record)
+        runtime.records[key] = record
+        runtime.sync_targets()
+        runtime.engine.started = 0
+        runtime.engine.clock = lambda: 900
+        state = runtime.engine.states[self.key]
+        state.auth_failures, state.auth_since = 2, 0
+        runtime.engine.verify_publication = AsyncMock()
+        runtime.verify_publication = AsyncMock()
+        reserved, failed, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        put = self.vault.put
+
+        async def read(target):
+            if target["entry_id"] == key:
+                await reserved.wait()
+                raise OSError()
+            if not release.is_set():
+                raise AuthenticationFailure()
+            return {"temperature": 21, "humidity": 45}
+
+        async def repair(_target):
+            self.assertEqual((await runtime.store.async_load())[self.key]["attempts"], [900])
+            reserved.set()
+            await release.wait()
+            return True
+
+        async def put_record(device_key, record):
+            if device_key == key:
+                failed.set()
+                raise OSError()
+            return await put(device_key, record)
+
+        self.backend.read_ha.side_effect = read
+        self.backend.restore_missing.side_effect = repair
+        with patch.object(self.vault, "put", side_effect=put_record):
+            poll = asyncio.create_task(runtime.update())
+            try:
+                await asyncio.wait_for(failed.wait(), 2)
+                self.assertFalse(poll.done())
+                release.set()
+                with self.assertRaises(UpdateFailed):
+                    await asyncio.wait_for(poll, 2)
+                saved = (await runtime.store.async_load())[self.key]
+                self.assertEqual((saved["attempts"], saved["repairs"], saved["publication_pending"]), ([900], 1, False))
+                self.assertEqual(self.vault.record(key), record)
+                self.assertEqual(runtime.pending_tasks, {})
+            finally:
+                release.set()
+                await asyncio.gather(poll, return_exceptions=True)
+                await runtime.stop()
+
+    async def test_cancel_interrupts_verified_probe_without_same_poll_retry(self):
+        _, runtime = await self.make_runtime(recovery=False)
+        active = deepcopy(runtime.records[self.key])
+        active_target = make_owned("synthetic-active", self.target["accessory_key"], {})
+        active_target["recovery"] = False
+        active_key = active_target["entry_id"]
+        active.update(target=active_target, phase="active")
+        await self.vault.put(active_key, active)
+        runtime.records[active_key] = active
+        runtime.sync_targets()
+        pending_started, pending_exited, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        runtime.engine.verify_publication = AsyncMock()
+
+        async def read(target):
+            if target["entry_id"] == self.key:
+                pending_started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    pending_exited.set()
+            await release.wait()
+            return {"temperature": 21, "humidity": 45}
+
+        self.backend.read_ha.side_effect = read
+        poll = asyncio.create_task(runtime.update())
+        cancel = None
+        try:
+            await asyncio.wait_for(pending_started.wait(), 2)
+            cancel = asyncio.create_task(runtime.cancel_device(self.key))
+            await asyncio.wait_for(pending_exited.wait(), 2)
+            self.assertFalse(poll.done())
+            release.set()
+            await asyncio.wait_for(asyncio.gather(poll, cancel), 2)
+            self.assertEqual(self.backend.read_ha.await_count, 2)
+            self.assertTrue(self.vault.record(self.key)["cancelled"])
+            self.assertNotIn("authorised_boot", self.vault.record(self.key))
+            self.assertEqual(runtime.pending_tasks, {})
+        finally:
+            release.set()
+            poll.cancel()
+            await asyncio.gather(poll, *([cancel] if cancel else []), return_exceptions=True)
+            await runtime.stop()
 
     async def test_pending_samples_publish_but_setup_waits_for_actual_entities(self):
         config, runtime = await self.make_runtime()

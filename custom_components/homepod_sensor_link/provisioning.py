@@ -150,7 +150,11 @@ class Provisioner:
         target = record["target"]
         if record["phase"] in ("needs_credentials", "blocked", "transition_required"):
             return record, None
-        previous = deepcopy(record) if not resume and record.get("error") == "device_unreachable" else None
+        previous = (
+            deepcopy(record)
+            if not resume and record.get("error") in ("device_unreachable", "resume_required", "recovery_pending")
+            else None
+        )
         # Following restart, only a fresh read with the existing dedicated key
         # is automatic. Any further pairing write needs explicit Resume.
         try:
@@ -177,7 +181,10 @@ class Provisioner:
             allowed = False
         if not allowed:
             record["error"] = "recovery_pending" if record.get("commissioned") else "resume_required"
-            await self.vault.put(key, record)
+            # A status-only retry need not rewrite identical data. An endpoint
+            # change or consumed boot authorisation still changes the record.
+            if record != previous:
+                await self.vault.put(key, record)
             return record, None
         # Persist before the first pairing operation, even if cancellation or an
         # ambiguous network result follows. Reuse this target on every retry.
