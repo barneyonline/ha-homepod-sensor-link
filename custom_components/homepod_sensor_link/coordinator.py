@@ -6,6 +6,7 @@ from typing import Any, cast
 from .repairs import create_issue
 from .models import Data, Target, Record, Snapshot, Readings, Backend, ProvisioningBackend
 from collections.abc import Callable, Awaitable
+from functools import partial
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from datetime import datetime
@@ -379,18 +380,7 @@ class Runtime:
                 state.auth_failures, state.auth_since = 0, None
             return self.engine.snapshot()
         if not self.stopped and self.hass.state == CoreState.running:
-            if self.vault:
-                async with self.engine.lock:
-                    async with asyncio.TaskGroup() as group:
-                        for key, record in list(self.records.items()):
-                            if (
-                                not self.stopped
-                                and record["phase"] not in ("active", "transition_required")
-                                and record["target"].get("owned")
-                            ):
-                                group.create_task(self.inspect_pending(key))
-                    self.sync_targets()
-            await self.engine.check_all()
+            await self.engine.check_all(self._check_devices if self.vault else None)
             self.watchdog.check()
             await self.audit.check()
             if self.vault:
@@ -399,7 +389,39 @@ class Runtime:
                         await self.finish_publication(key)
         return self.engine.snapshot()
 
-    async def inspect_pending(self, key: str) -> None:
+    async def _check_devices(self) -> None:
+        """Check active devices alongside provisioning under the engine lock."""
+        errors: list[Exception] = []
+
+        async def check(work: Callable[[], Awaitable[None]]) -> None:
+            try:
+                await work()
+            except Exception as error:
+                errors.append(error)
+
+        active = [target for target in self.engine.targets if self.records[target["entry_id"]]["phase"] == "active"]
+        interrupted = set()
+
+        async def inspect(key: str) -> None:
+            if not await self.inspect_pending(key):
+                interrupted.add(key)
+
+        async with asyncio.TaskGroup() as group:
+            for target in active:
+                group.create_task(check(partial(self.engine.check_target, target)))
+            for key, record in self.records.items():
+                if record["phase"] not in ("active", "transition_required") and record["target"].get("owned"):
+                    group.create_task(check(partial(inspect, key)))
+        self.sync_targets()
+        if errors:
+            await self.save_state(self.engine.snapshot())
+            raise ExceptionGroup("HomePod checks failed", errors)
+        # A device that was pending at the start of the poll can only enter
+        # the engine after provisioning finishes and synchronises its target.
+        checked = interrupted | {target["entry_id"] for target in active}
+        await self.engine.check_targets([target for target in self.engine.targets if target["entry_id"] not in checked])
+
+    async def inspect_pending(self, key: str) -> bool:
         task = asyncio.create_task(self.provisioner.inspect(key))
         self.pending_tasks[key] = task
         try:
@@ -407,7 +429,7 @@ class Runtime:
         except asyncio.CancelledError:
             if cast(asyncio.Task[None], asyncio.current_task()).cancelling():
                 raise
-            return
+            return False
         finally:
             self.pending_tasks.pop(key, None)
         self.records[key] = record
@@ -416,6 +438,7 @@ class Runtime:
             await self.finish_publication(key)
         self.engine.states[key].last_completed = dt_util.utcnow().timestamp()
         self.watchdog.completed(key)
+        return True
 
     async def save_state(self, current: Snapshot) -> None:
         self.saved.update(current)
