@@ -565,14 +565,6 @@ class Runtime:
         if recovered:
             ir.async_delete_issue(self.hass, DOMAIN, "access_" + key)
             persistent_notification.async_dismiss(self.hass, notification_id)
-            if state.last_repair is not None and state.last_repair == state.last_verified:
-                persistent_notification.async_create(
-                    self.hass,
-                    f"{name}: The dedicated controller's missing pairing was restored and fresh sensor readings were verified. "
-                    f"Total repairs: {state.repairs}.",
-                    title="HomePod connection recovered",
-                    notification_id=notification_id + "_recovered",
-                )
             _LOGGER.info("%s: connection verified; total repairs %s", name, state.repairs)
         else:
             create_issue(self.hass, "access_" + key, "sensor_access", self.entry.entry_id, ir.IssueSeverity.ERROR)

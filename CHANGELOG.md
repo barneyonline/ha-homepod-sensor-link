@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file.
 
 - Keep active HomePod sensor reads running while another HomePod is still being set up.
 - Avoid rewriting unchanged onboarding failures after a fresh authentication check, and reuse the accessory lookup across device selections.
+- Successful HomePod recovery now silently clears any outstanding recovery alert.
 
 ### 🔄 Other changes
 
