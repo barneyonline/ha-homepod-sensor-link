@@ -18,13 +18,35 @@ All notable changes to this project will be documented in this file.
 
 ### 🔧 Improvements
 
-- Keep active HomePod sensor reads running while another HomePod is still being set up.
-- Avoid rewriting unchanged onboarding failures after a fresh authentication check, and reuse the accessory lookup across device selections.
-- Successful HomePod recovery now silently clears any outstanding recovery alert.
+- None
 
 ### 🔄 Other changes
 
 - None
+
+## v1.2.0 - 2026-11-14
+
+### 🚧 Breaking changes
+
+- None
+
+### ✨ New features
+
+- None
+
+### 🐛 Bug fixes
+
+- None
+
+### 🔧 Improvements
+
+- Keep active HomePod sensor reads running while another HomePod is still being set up.
+- Avoid rewriting unchanged onboarding failures after a fresh authentication check, and reuse the accessory lookup across device selections.
+- Successful automatic recovery silently clears any outstanding recovery alert. Failed recovery still raises an alert.
+
+### 🔄 Other changes
+
+- Set the integration manifest and project version to `1.2.0`.
 
 ## v1.1.1 - 2026-11-13
 
