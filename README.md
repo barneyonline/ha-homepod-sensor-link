@@ -22,7 +22,7 @@
 </p>
 
 > [!IMPORTANT]
-> HomePod Sensor Link is an independent community project with no affiliation to Apple. Review the [known limitations](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations) before installing. No HACS listing is claimed.
+> HomePod Sensor Link is an independent community project with no affiliation to Apple. Review the [known limitations](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Known-Limitations) before installing.
 
 ## Key features
 
@@ -58,11 +58,11 @@ Temperature, humidity and sensor connection health, alongside options to add, im
 [![Open HomePod Sensor Link in Home Assistant Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=barneyonline&repository=ha-homepod-sensor-link&category=integration)
 
 1. Follow the [credential extraction guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction) to prepare your controller credentials. The guide covers the [macOS wizard](scripts/macos_homekit_wizard.sh), automatic JSON export and security restoration.
-2. On **HA 2026.11+**, use the button above or add `https://github.com/barneyonline/ha-homepod-sensor-link` via **Settings → Marketplace → Add from link**. Connect GitHub if prompted and choose **Integration**.
-3. Open **HomePod Sensor Link**, select **Install**, choose a [tagged release](https://github.com/barneyonline/ha-homepod-sensor-link/releases/latest) and restart if prompted.
+2. Open **Settings → Marketplace** and search the catalog for **HomePod Sensor Link**, or use the button above.
+3. Select **Install**, review the offered version and confirm. Restart Home Assistant if prompted.
 4. Continue setup or open **Settings → Devices & services → Add integration → HomePod Sensor Link**. Paste your CSV/JSON export or enter controller credentials, then select devices and a recovery policy.
 
-See the [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) for detailed installation steps and [HA’s Marketplace instructions](https://www.home-assistant.io/integrations/marketplace/#custom-repositories) for adding custom repositories.
+See the [setup guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Getting-Started#installation) for detailed installation steps.
 <!-- ha-marketplace:exclude-end -->
 
 Requires **Home Assistant 2026.11.0+** (Python **3.14+**).
