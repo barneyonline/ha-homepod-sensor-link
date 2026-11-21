@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 from .models import Target, Snapshot, PairingRow, Clock, SaveState, Backend
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 
 
 import asyncio
@@ -187,20 +187,20 @@ class RecoveryEngine:
                 await check_devices()
             await self.save(self.snapshot())
 
-    async def check_targets(self, targets: list[Target]) -> None:
+    async def check_targets(self, targets: list[Target], *, verified_reports: Collection[str] = ()) -> None:
         async with asyncio.TaskGroup() as group:
             for target in targets:
-                group.create_task(self.check_target(target))
+                group.create_task(self.check_target(target, report_verified=target["entry_id"] in verified_reports))
 
-    async def check_target(self, target: Target) -> None:
-        """Run a fresh check while the caller holds the engine lock."""
+    async def check_target(self, target: Target, *, report_verified: bool = False) -> None:
+        """Check a device under the lock, optionally using a report verified in this poll."""
         if self.is_active():
-            await self._check(target)
+            await self._check(target, report_verified=report_verified)
             key = target["entry_id"]
             self.states[key].last_completed = self.clock()
             self.check_completed(key)
 
-    async def _check(self, target: Target) -> None:
+    async def _check(self, target: Target, *, report_verified: bool) -> None:
         state = self.states[target["entry_id"]]
         now = self.clock()
         state.last_checked = now
@@ -209,8 +209,20 @@ class RecoveryEngine:
         state.publication_attempts = [t for t in state.publication_attempts if now - t < PUBLICATION_WINDOW]
         if state.blocked:
             return
+        verify = self.verify_publication
+        reuse_report = False
+        if report_verified and not state.publication_pending and verify is not None:
+            # A peer check may have outlasted the reports or an entity may
+            # have been removed while the poll was waiting for that peer.
+            try:
+                await verify(target)
+            except (OSError, SafetyFailure):
+                pass
+            else:
+                reuse_report = True
         try:
-            await self.backend.read_ha(target)
+            if not reuse_report:
+                await self.backend.read_ha(target)
         except AuthenticationFailure:
             state.last_error_type, state.last_error_location = "AuthenticationFailure", None
             state.auth_failures += 1
@@ -238,10 +250,12 @@ class RecoveryEngine:
         else:
             state.auth_since, state.auth_failures = None, 0
             if (
-                not state.publication_pending or (not self.automatic_recovery or not target.get("recovery", True))
-            ) and self.verify_publication is not None:
+                not reuse_report
+                and (not state.publication_pending or not self.automatic_recovery or not target.get("recovery", True))
+                and verify is not None
+            ):
                 try:
-                    await self.verify_publication(target)
+                    await verify(target)
                 except SafetyFailure:
                     state.blocked, state.status, state.reason = True, "blocked", "sensor_inventory_changed"
                     await self.notify(target, state, False)

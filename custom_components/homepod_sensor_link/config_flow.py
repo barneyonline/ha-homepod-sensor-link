@@ -15,6 +15,7 @@ import probatio as vol
 from homeassistant import config_entries
 from homeassistant.helpers import selector
 
+from . import async_finish_removed_entry_cleanup
 from .backend import HomeKitBackend
 from .credentials import DOMAIN, public_targets
 from .onboarding import discover_devices, controller_session
@@ -160,6 +161,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_devices(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
+        if not await async_finish_removed_entry_cleanup(self.hass):
+            return self.async_abort(reason="previous_cleanup_failed")
         errors = {}
         try:
             self._discovered = (
@@ -353,8 +356,10 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_verify()
 
     async def _prepare(self) -> list[str]:
-        results = []
+        results: list[str] = []
         try:
+            if not await async_finish_removed_entry_cleanup(self.hass):
+                return results
             current = self._current()
             preferred_keys = frozenset(current.data["device_keys"]) if current else frozenset()
             async with controller_session(self.hass) as (controller, zc):

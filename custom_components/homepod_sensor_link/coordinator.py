@@ -6,7 +6,9 @@ from typing import Any, cast
 from .repairs import create_issue
 from .models import Data, Target, Record, Snapshot, Readings, Backend, ProvisioningBackend
 from collections.abc import Callable, Awaitable
+from enum import Enum
 from functools import partial
+from time import monotonic
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from datetime import datetime
@@ -14,6 +16,7 @@ from zeroconf.asyncio import AsyncZeroconf
 
 
 import asyncio
+from dataclasses import dataclass
 from datetime import timedelta
 import logging
 from copy import deepcopy
@@ -46,6 +49,19 @@ STARTUP_SAMPLE_MAX_AGE = 30
 
 
 type HomePodConfigEntry = ConfigEntry[Runtime]
+
+
+@dataclass(frozen=True)
+class _StartupSample:
+    target: Target
+    reported_at: datetime
+    captured_at: float
+
+
+class PendingInspection(Enum):
+    INTERRUPTED = "interrupted"
+    UNVERIFIED = "unverified"
+    REPORTS_VERIFIED = "reports_verified"
 
 
 def conflicting_recovery(hass: HomeAssistant) -> bool:
@@ -114,7 +130,7 @@ class Runtime:
         self.measurement_listeners: dict[str, set[Callable[[], None]]] = {}
         self.pending_tasks: dict[str, asyncio.Task[tuple[Record, Readings | None]]] = {}
         self.name_refresh_task: asyncio.Task[None] | None = None
-        self._startup_samples: dict[str, tuple[Target, datetime, float]] = {}
+        self._startup_samples: dict[str, _StartupSample] = {}
         self._use_startup_samples = False
         self.records: dict[str, Record] = {}
         self.stopped = self.closed = False
@@ -267,8 +283,23 @@ class Runtime:
         # Report this device synchronously before verify_publication checks HA's
         # last_reported timestamps. The final coordinator update publishes
         # health/inventory once, without an inventory-wide broadcast per read.
+        self._report_measurements(key)
+
+    def discard_startup_readings(self) -> None:
+        keys = tuple(self.readings)
+        self.readings.clear()
+        for key in keys:
+            self._report_measurements(key)
+
+    def _report_measurements(self, key: str) -> None:
         for listener in tuple(self.measurement_listeners.get(key, ())):
             listener()
+
+    def fresh_reading(self, key: str) -> tuple[datetime, Readings] | None:
+        sample = self.readings.get(key)
+        if sample is not None and 0 <= (dt_util.utcnow() - sample[0]).total_seconds() <= 2 * INTERVAL:
+            return sample
+        return None
 
     def listen_measurements(self, key: str, listener: Callable[[], None]) -> Callable[[], None]:
         listeners = self.measurement_listeners.setdefault(key, set())
@@ -295,9 +326,10 @@ class Runtime:
             sample = self.readings.get(key)
             if (
                 sample is not None
-                and (target, sample[0]) == previous[:2]
+                and target == previous.target
+                and sample[0] == previous.reported_at
                 and not self.engine.states[key].publication_pending
-                and 0 <= self.hass.loop.time() - previous[2] < STARTUP_SAMPLE_MAX_AGE
+                and 0 <= self.hass.loop.time() - previous.captured_at < STARTUP_SAMPLE_MAX_AGE
                 and 0 <= (dt_util.utcnow() - sample[0]).total_seconds() < STARTUP_SAMPLE_MAX_AGE
             ):
                 # Entities added after preflight report this original sample.
@@ -307,11 +339,12 @@ class Runtime:
         self.publish(target, values)
         return values
 
-    async def preflight(self) -> None:
+    async def preflight(self, on_verified: Callable[[], Awaitable[None]] | None = None) -> None:
         """Fresh read-only startup probes; no repair counters or pairing writes."""
         self._startup_samples.clear()
 
         async def probe(target: Target) -> str:
+            nonlocal on_verified
             state = self.engine.states[target["entry_id"]]
             if state.blocked:
                 return "blocked"
@@ -325,16 +358,22 @@ class Runtime:
             except Exception:
                 state.status, state.auth_failures, state.auth_since = "unreachable", 0, None
             else:
-                self._startup_samples[target["entry_id"]] = (
+                self._startup_samples[target["entry_id"]] = _StartupSample(
                     deepcopy(target),
                     self.readings[target["entry_id"]][0],
                     self.hass.loop.time(),
                 )
+                if on_verified is not None:
+                    start_platforms, on_verified = on_verified, None
+                    await start_platforms()
                 return "verified"
             return state.status
 
         async with self.engine.lock:
-            results = await asyncio.gather(*(probe(target) for target in self.engine.targets))
+            async with asyncio.TaskGroup() as group:
+                # Observe a child cancellation immediately. TaskGroup cancels
+                # and drains the peers before releasing the engine lock.
+                results = await asyncio.gather(*(group.create_task(probe(target)) for target in self.engine.targets))
             await self.save_state(self.engine.snapshot())
         if results and all(result == "unreachable" for result in results):
             raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key="unreachable")
@@ -348,18 +387,34 @@ class Runtime:
             self._use_startup_samples = False
             self._startup_samples.clear()
 
-    async def finish_publication(self, key: str) -> None:
+    async def finish_publication(self, key: str) -> bool:
         record = self.records[key]
         try:
             await self.verify_publication(record["target"])
         except (SafetyFailure, OSError):
-            return
-        record["phase"] = "active"
-        record["commissioned"] = True
-        record["error"] = None
-        if not record["target"].get("recovery", True):
-            record["target"].pop("source", None)
-        await cast(Vault, self.vault).put(key, record)
+            return False
+        target = record["target"]
+        fields = {"phase": "active", "commissioned": True, "error": None}
+        active = {**record, **fields, "target": dict(target)}
+        discard_source = not target.get("recovery", True)
+        if discard_source:
+            active["target"].pop("source", None)
+        vault = cast(Vault, self.vault)
+        cancellation = None
+        try:
+            await vault.put(key, active)
+        except asyncio.CancelledError as error:
+            # A cancelled vault write can still commit while its executor drains.
+            if vault.record(key) != active:
+                raise
+            cancellation = error
+        # The polling and inventory lists still reference this target.
+        if discard_source:
+            target.pop("source", None)
+        record.update(fields)
+        if cancellation is not None:
+            raise cancellation
+        return True
 
     async def update(self) -> Snapshot:
         try:
@@ -384,9 +439,11 @@ class Runtime:
             self.watchdog.check()
             await self.audit.check()
             if self.vault:
-                for key, record in list(self.records.items()):
-                    if record["phase"] == "verified" and self.engine.states[key].status == "healthy":
-                        await self.finish_publication(key)
+                async with self.engine.lock:
+                    if self.engine.is_active():
+                        for key, record in self.records.items():
+                            if record["phase"] == "verified" and self.engine.states[key].status == "healthy":
+                                await self.finish_publication(key)
         return self.engine.snapshot()
 
     async def _check_devices(self) -> None:
@@ -400,28 +457,41 @@ class Runtime:
                 errors.append(error)
 
         active = [target for target in self.engine.targets if self.records[target["entry_id"]]["phase"] == "active"]
-        interrupted = set()
+        interrupted: set[str] = set()
+        verified_reports: dict[str, float] = {}
 
         async def inspect(key: str) -> None:
-            if not await self.inspect_pending(key):
+            started = monotonic()
+            result = await self.inspect_pending(key)
+            if result is PendingInspection.INTERRUPTED:
                 interrupted.add(key)
+            elif result is PendingInspection.REPORTS_VERIFIED:
+                verified_reports[key] = started
 
-        async with asyncio.TaskGroup() as group:
-            for target in active:
-                group.create_task(check(partial(self.engine.check_target, target)))
-            for key, record in self.records.items():
-                if record["phase"] not in ("active", "transition_required") and record["target"].get("owned"):
-                    group.create_task(check(partial(inspect, key)))
-        self.sync_targets()
+        try:
+            async with asyncio.TaskGroup() as group:
+                for target in active:
+                    group.create_task(check(partial(self.engine.check_target, target)))
+                for key, record in self.records.items():
+                    if record["phase"] not in ("active", "transition_required") and record["target"].get("owned"):
+                        group.create_task(check(partial(inspect, key)))
+        finally:
+            self.sync_targets()
         if errors:
             await self.save_state(self.engine.snapshot())
             raise ExceptionGroup("HomePod checks failed", errors)
         # A device that was pending at the start of the poll can only enter
         # the engine after provisioning finishes and synchronises its target.
         checked = interrupted | {target["entry_id"] for target in active}
-        await self.engine.check_targets([target for target in self.engine.targets if target["entry_id"] not in checked])
+        now = monotonic()
+        # Count the whole inspection, including any wait for its vault commits.
+        recent_reports = {key for key, started in verified_reports.items() if now - started < INTERVAL}
+        await self.engine.check_targets(
+            [target for target in self.engine.targets if target["entry_id"] not in checked],
+            verified_reports=recent_reports,
+        )
 
-    async def inspect_pending(self, key: str) -> bool:
+    async def inspect_pending(self, key: str) -> PendingInspection:
         task = asyncio.create_task(self.provisioner.inspect(key))
         self.pending_tasks[key] = task
         try:
@@ -429,16 +499,17 @@ class Runtime:
         except asyncio.CancelledError:
             if cast(asyncio.Task[None], asyncio.current_task()).cancelling():
                 raise
-            return False
+            return PendingInspection.INTERRUPTED
         finally:
             self.pending_tasks.pop(key, None)
         self.records[key] = record
+        verified = False
         if values:
             self.publish(record["target"], values)
-            await self.finish_publication(key)
+            verified = await self.finish_publication(key)
         self.engine.states[key].last_completed = dt_util.utcnow().timestamp()
         self.watchdog.completed(key)
-        return True
+        return PendingInspection.REPORTS_VERIFIED if verified else PendingInspection.UNVERIFIED
 
     async def save_state(self, current: Snapshot) -> None:
         self.saved.update(current)
@@ -458,11 +529,12 @@ class Runtime:
         ]
 
     async def verify_publication(self, target: Target) -> None:
-        ids = self.entities.get(target["entry_id"], {})
+        key = target["entry_id"]
+        ids = self.entities.get(key, {})
         if set(ids) != {"temperature", "humidity"}:
             raise OSError("sensor_entities_not_ready")
         states = [self.hass.states.get(entity_id) for entity_id in ids.values()]
-        sample = self.readings.get(target["entry_id"])
+        sample = self.fresh_reading(key)
         if not sample or not all(
             s and s.state not in ("unknown", "unavailable") and s.last_reported >= sample[0] for s in states
         ):

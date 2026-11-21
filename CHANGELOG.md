@@ -18,7 +18,8 @@ All notable changes to this project will be documented in this file.
 
 ### 🔧 Improvements
 
-- None
+- Report measurements from reachable HomePods while other HomePods are still connecting at startup.
+- Reduce repeated sensor reads and credential copying when paired HomePods finish setup.
 
 ### 🔄 Other changes
 

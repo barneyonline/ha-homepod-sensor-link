@@ -75,6 +75,17 @@ def _load(config_dir: str) -> Data:
         os.close(directory)
 
 
+async def async_drain_future[T](future: asyncio.Future[T]) -> asyncio.CancelledError | None:
+    """Wait for the future to finish while deferring caller cancellation."""
+    cancellation = None
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError as error:
+            cancellation = error
+    return cancellation
+
+
 class Vault:
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
@@ -134,17 +145,12 @@ class Vault:
     ) -> None:
         # Repeated cancellations must not release the vault lock while an
         # executor worker can still change the file.
-        cancelled = False
-        while not task.done():
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError:
-                cancelled = True
+        cancellation = await async_drain_future(task)
         task.result()
         self.data = data
         if index is not None:
             self._accessory_index = (data["records"], index)
-        if cancelled:
+        if cancellation is not None:
             raise asyncio.CancelledError
 
     async def _commit(self, data: Data, index: dict[str, list[str]] | None = None) -> None:
@@ -153,14 +159,16 @@ class Vault:
 
     async def put(self, key: str, record: Record, *, require_existing: bool = False) -> bool:
         async with self.lock:
-            if require_existing and key not in self.data["records"]:
+            records = self.data["records"]
+            if require_existing and key not in records:
                 return False
-            data = deepcopy(self.data)
-            data["records"][key] = deepcopy(record)
-            if len(data["records"]) > 64:
+            # Vault-owned entries are replaced under the lock. Shared records
+            # and states stay unchanged until the executor finishes serializing.
+            updated = {**records, key: deepcopy(record)}
+            if len(updated) > 64:
                 raise SafetyFailure("inventory_capacity")
             index = self._index_after_put(key, record)
-            await self._commit(data, index)
+            await self._commit({**self.data, "records": updated}, index)
             return True
 
     def _index_after_put(self, key: str, record: Record) -> dict[str, list[str]] | None:
