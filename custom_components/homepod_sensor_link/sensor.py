@@ -13,8 +13,6 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import EntityCategory, UnitOfTemperature, PERCENTAGE
 from homeassistant.util import dt as dt_util
 
-from .engine import INTERVAL
-
 PARALLEL_UPDATES = 0
 
 
@@ -61,7 +59,6 @@ class Measurement(DeviceSensor):
     @property
     def available(self) -> bool:
         record = self.runtime.records.get(self.key)
-        sample = self.runtime.readings.get(self.key)
         state = self.runtime.engine.states.get(self.key)
         return bool(
             record
@@ -69,8 +66,7 @@ class Measurement(DeviceSensor):
             and not record.get("cancelled")
             and state
             and not state.blocked
-            and sample
-            and 0 <= (dt_util.utcnow() - sample[0]).total_seconds() <= 2 * INTERVAL
+            and self.runtime.fresh_reading(self.key) is not None
         )
 
     @property

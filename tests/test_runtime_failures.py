@@ -105,7 +105,10 @@ class RuntimeFailureTests(unittest.IsolatedAsyncioTestCase):
             controller.async_stop.assert_awaited_once()
             self.assertNotIn(integration.OWNER, self.hass.data)
         fake = SimpleNamespace(
-            initialize=AsyncMock(side_effect=OSError()), stop=AsyncMock(side_effect=OSError()), closed=False
+            initialize=AsyncMock(side_effect=OSError()),
+            stop=AsyncMock(side_effect=OSError()),
+            discard_startup_readings=lambda: None,
+            closed=False,
         )
         with (
             self.network_boundary(),
@@ -113,7 +116,8 @@ class RuntimeFailureTests(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(ConfigEntryNotReady),
         ):
             await integration.async_setup_entry(self.hass, config)
-        self.assertEqual(self.hass.data.pop(integration.OWNER), config.entry_id)
+        self.assertEqual(self.hass.data[integration.OWNER], config.entry_id)
+        self.assertFalse(hasattr(config, "runtime_data"))
         fake.closed = True
         fake.stop.side_effect = None
         with (
@@ -122,6 +126,8 @@ class RuntimeFailureTests(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(ConfigEntryNotReady),
         ):
             await integration.async_setup_entry(self.hass, config)
+        self.assertEqual(fake.initialize.await_count, 2)
+        self.assertEqual(fake.stop.await_count, 3)
         self.assertNotIn(integration.OWNER, self.hass.data)
 
     async def test_start_stop_hooks_and_failed_unload_keep_services_and_owner_consistent(self):

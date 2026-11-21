@@ -1,8 +1,10 @@
 """Count offline polling I/O and credential copies without weakening checkpoints."""
 
+import asyncio
 from copy import deepcopy
 from pathlib import Path
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -160,6 +162,38 @@ class ProtectedStorageOperationTests(unittest.IsolatedAsyncioTestCase):
         location.chmod(0o644)
         with self.assertRaises(ValueError):
             await self.vault.put("disposable", record)
+
+    async def test_record_update_keeps_executor_snapshot_isolated_from_callers(self):
+        peer = {"target": {"entry_id": "peer", "accessory_id": "peer"}, "phase": "active"}
+        await self.vault.put("peer", peer)
+        self.vault.record_for_accessory("peer")
+        record = {"target": {"entry_id": "updated", "accessory_id": "updated"}, "phase": "verified"}
+        expected = deepcopy(record)
+        entered, release = asyncio.Event(), threading.Event()
+        write = vault_module._write
+        loop = asyncio.get_running_loop()
+
+        def blocked(config_dir, snapshot):
+            loop.call_soon_threadsafe(entered.set)
+            if not release.wait(5):
+                raise TimeoutError
+            write(config_dir, snapshot)
+
+        with patch.object(vault_module, "_write", blocked):
+            commit = asyncio.create_task(self.vault.put("updated", record))
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                self.assertIsNone(self.vault.record_for_accessory("updated"))
+                caller_peer = self.vault.record_for_accessory("peer")
+                caller_peer["target"]["accessory_id"] = "caller mutation"
+                record["target"]["accessory_id"] = "caller mutation"
+            finally:
+                release.set()
+                await commit
+        self.assertEqual(self.vault.record_for_accessory("updated"), expected)
+        self.assertEqual(self.vault.record_for_accessory("peer"), peer)
+        self.assertIsNone(self.vault.record_for_accessory("caller mutation"))
+        self.assertEqual((await Vault(self.hass).load()).records(), {"peer": peer, "updated": expected})
 
     async def test_sixty_four_individual_reads_copy_sixty_four_records_and_preserve_isolation(self):
         copies = []

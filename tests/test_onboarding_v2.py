@@ -29,7 +29,7 @@ from custom_components.homepod_sensor_link import (
 from custom_components.homepod_sensor_link.backend import HomeKitBackend
 from custom_components.homepod_sensor_link.config_flow import HomePodSensorLinkFlow
 from custom_components.homepod_sensor_link.credentials import DOMAIN, public_targets
-from custom_components.homepod_sensor_link.engine import AuthenticationFailure, SafetyFailure
+from custom_components.homepod_sensor_link.engine import AuthenticationFailure, INTERVAL, SafetyFailure
 from custom_components.homepod_sensor_link.importer import parse_export, MAX_IMPORT
 from custom_components.homepod_sensor_link.provisioning import make_owned, Provisioner, prepare, boot_id
 from custom_components.homepod_sensor_link.sensor import Measurement, RecoveryStatus
@@ -52,6 +52,20 @@ def entry(data=None):
         discovery_keys={},
         subentries_data=None,
     )
+
+
+def sensor_platform(hass, config):
+    platform = EntityPlatform(
+        hass=hass,
+        logger=logging.getLogger(__name__),
+        domain="sensor",
+        platform_name=DOMAIN,
+        platform=None,
+        scan_interval=timedelta(seconds=INTERVAL),
+        entity_namespace=None,
+    )
+    platform.config_entry = config
+    return platform
 
 
 def export_fixture():
@@ -301,16 +315,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_sensor_publication_and_administrator_discard(self):
         config, runtime = await self.make_runtime(recovery=False)
-        platform = EntityPlatform(
-            hass=self.hass,
-            logger=logging.getLogger(__name__),
-            domain="sensor",
-            platform_name=DOMAIN,
-            platform=None,
-            scan_interval=timedelta(seconds=300),
-            entity_namespace=None,
-        )
-        platform.config_entry = config
+        platform = sensor_platform(self.hass, config)
         entities = [Measurement(runtime, self.target, kind) for kind in ("temperature", "humidity")]
         try:
             await platform.async_add_entities(entities)
@@ -706,16 +711,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_manage_removal_removes_only_owned_entities_and_device(self):
         config, runtime = await self.make_runtime()
-        platform = EntityPlatform(
-            hass=self.hass,
-            logger=logging.getLogger(__name__),
-            domain="sensor",
-            platform_name=DOMAIN,
-            platform=None,
-            scan_interval=timedelta(seconds=300),
-            entity_namespace=None,
-        )
-        platform.config_entry = config
+        platform = sensor_platform(self.hass, config)
         owned = [Measurement(runtime, self.target, kind) for kind in ("temperature", "humidity")]
         registry = er.async_get(self.hass)
         native = registry.async_get_or_create(

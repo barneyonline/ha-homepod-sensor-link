@@ -1,19 +1,20 @@
 """Operation-count benchmarks with real HA reports and device churn."""
 
+import asyncio
 from copy import deepcopy
 from datetime import timedelta
-import logging
 import unittest
 from unittest.mock import Mock, patch
 
 from homeassistant.components import persistent_notification
-from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.util import dt as dt_util
 
-from custom_components.homepod_sensor_link import sensor
-from custom_components.homepod_sensor_link.credentials import DOMAIN, public_targets
+from custom_components.homepod_sensor_link import coordinator, sensor, vault as vault_module
+from custom_components.homepod_sensor_link.credentials import public_targets
+from custom_components.homepod_sensor_link.engine import INTERVAL, WINDOW
 from custom_components.homepod_sensor_link.entity import DeviceSensor
 from custom_components.homepod_sensor_link.provisioning import make_owned
+from custom_components.homepod_sensor_link.vault import Vault
 import test_onboarding_v2 as fixtures
 
 
@@ -21,6 +22,165 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
     make_runtime = fixtures.OnboardingTests.make_runtime
+
+    async def test_verified_activation_scales_without_skipping_durable_checkpoints(self):
+        config, runtime = await self.make_runtime(recovery=False)
+        try:
+            for count in (1, 16, 64):
+                with self.subTest(devices=count):
+                    await self.check_activation_counts(config, runtime, count)
+        finally:
+            await runtime.stop()
+
+    async def check_activation_counts(self, config, runtime, count):
+        records = {}
+        for index in range(count):
+            target = make_owned(f"disposable-{index}", self.target["accessory_key"], {})
+            target["recovery"] = False
+            records[target["entry_id"]] = {"target": target, "phase": "prepared"}
+        self.vault.data["records"] = deepcopy(records)
+        await self.vault.save_states({})
+        runtime.records = records
+        runtime.engine.states.clear()
+        runtime.saved.clear()
+        runtime.sync_targets()
+        for state in runtime.engine.states.values():
+            state.auth_since, state.auth_failures = 1, 2
+            state.attempts = [runtime.engine.clock() - WINDOW - 1]
+            state.publication_attempts = [1]
+            state.last_error_type, state.last_error_location = "AuthenticationFailure", "test"
+        platform = fixtures.sensor_platform(self.hass, config)
+        await platform.async_add_entities(
+            [
+                sensor.Measurement(runtime, target, kind)
+                for target in runtime.targets
+                for kind in ("temperature", "humidity")
+            ]
+        )
+        self.backend.read_ha.reset_mock(side_effect=True, return_value=True)
+        self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
+        record_copies: list[int] = []
+        phases = {key: [] for key in records}
+        put = self.vault.put
+
+        async def record_checkpoint(key, record):
+            phases[key].append(record["phase"])
+            return await put(key, record)
+
+        def count_record_copy(value):
+            if isinstance(value, dict):
+                inventory = value.get("records", value)
+                if "target" in inventory and "phase" in inventory:
+                    record_copies.append(1)
+                else:
+                    record_copies.extend(
+                        1
+                        for item in inventory.values()
+                        if isinstance(item, dict) and {"target", "phase"} <= item.keys()
+                    )
+            return deepcopy(value)
+
+        try:
+            with (
+                patch.object(vault_module, "deepcopy", side_effect=count_record_copy),
+                patch.object(self.vault, "put", side_effect=record_checkpoint),
+                patch.object(vault_module, "_write", wraps=vault_module._write) as write,
+                patch.object(vault_module.os, "fsync", wraps=vault_module.os.fsync) as fsync,
+            ):
+                snapshot = await runtime.update()
+                self.assertEqual(self.backend.read_ha.await_count, count)
+                self.assertEqual(record_copies, [1] * (3 * count))
+                self.assertEqual(write.call_count, 2 * count + 1)
+                self.assertEqual(fsync.call_count, 4 * count + 2)
+                self.assertEqual(phases, {key: ["verified", "active"] for key in records})
+            restored = await Vault(self.hass).load()
+            self.assertEqual(set(snapshot), set(records))
+            for key, record in restored.records().items():
+                self.assertEqual(record["phase"], "active")
+                self.assertTrue(record["commissioned"])
+                state = snapshot[key]
+                self.assertEqual(state, restored.data["states"][key])
+                self.assertEqual(state["status"], "healthy")
+                self.assertEqual((state["auth_since"], state["auth_failures"]), (None, 0))
+                self.assertEqual((state["last_error_type"], state["last_error_location"]), (None, None))
+                self.assertEqual((state["attempts"], state["publication_attempts"]), ([], []))
+                self.assertLessEqual(state["last_checked"], state["last_verified"])
+                self.assertLessEqual(state["last_verified"], state["last_completed"])
+                await runtime.verify_publication(record["target"])
+            self.assertEqual(runtime.pending_tasks, {})
+            self.backend.restore_missing.assert_not_awaited()
+            self.backend.read_ha.reset_mock()
+            self.backend.read_ha.return_value = {"temperature": 22, "humidity": 46}
+            await runtime.update()
+            self.assertEqual(self.backend.read_ha.await_count, count)
+            self.assertTrue(all(runtime.readings[key][1]["temperature"] == 22 for key in records))
+        finally:
+            await platform.async_reset()
+
+    async def test_activation_reports_must_still_be_fresh_when_peer_check_finishes(self):
+        for changed in ("removed", "expired", "authentication_due"):
+            with self.subTest(changed=changed):
+                config, runtime = await self.make_runtime(recovery=False)
+                peer = make_owned("disposable-peer", self.target["accessory_key"], {})
+                peer["recovery"] = False
+                peer_key = peer["entry_id"]
+                peer_record = {"target": peer, "phase": "active"}
+                await self.vault.put(peer_key, peer_record)
+                runtime.records[peer_key] = peer_record
+                runtime.sync_targets()
+                platform = fixtures.sensor_platform(self.hass, config)
+                temperature, humidity = [
+                    sensor.Measurement(runtime, self.target, kind) for kind in ("temperature", "humidity")
+                ]
+                await platform.async_add_entities([temperature, humidity])
+                committed, release = asyncio.Event(), asyncio.Event()
+                reads = []
+                put = self.vault.put
+                elapsed = 0
+
+                async def put_record(key, record):
+                    await put(key, record)
+                    if key == self.key and record["phase"] == "active":
+                        committed.set()
+
+                async def read(target):
+                    if target["entry_id"] == peer_key:
+                        await release.wait()
+                        raise OSError()
+                    reads.append(target["entry_id"])
+                    return {"temperature": 20 + len(reads), "humidity": 45}
+
+                self.backend.read_ha.side_effect = read
+                with (
+                    patch.object(self.vault, "put", side_effect=put_record),
+                    patch.object(coordinator, "monotonic", lambda: elapsed),
+                ):
+                    poll = asyncio.create_task(runtime.update())
+                    try:
+                        await asyncio.wait_for(committed.wait(), 2)
+                        await runtime.verify_publication(self.target)
+                        if changed == "expired":
+                            timestamp, values = runtime.readings[self.key]
+                            runtime.readings[self.key] = (timestamp - timedelta(seconds=2 * INTERVAL + 1), values)
+                        elif changed == "removed":
+                            await humidity.async_remove()
+                        else:
+                            elapsed = INTERVAL
+                            self.assertTrue(temperature.available)
+                            self.assertTrue(humidity.available)
+                        release.set()
+                        snapshot = await asyncio.wait_for(poll, 2)
+                        self.assertEqual(reads, [self.key, self.key])
+                        self.assertEqual(
+                            snapshot[self.key]["status"],
+                            "publication_unavailable" if changed == "removed" else "healthy",
+                        )
+                        self.assertEqual(runtime.readings[self.key][1]["temperature"], 22)
+                    finally:
+                        release.set()
+                        await asyncio.gather(poll, return_exceptions=True)
+                        await platform.async_reset()
+                        await runtime.stop()
 
     async def test_actual_entity_reports_scale_linearly_and_stay_fresh(self):
         for count in (1, 16, 64):
@@ -35,16 +195,7 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                     runtime.records[target["entry_id"]] = {"target": target, "phase": "active"}
                 runtime.sync_targets()
                 runtime.coordinator.async_set_updated_data(runtime.engine.snapshot())
-                platform = EntityPlatform(
-                    hass=self.hass,
-                    logger=logging.getLogger(__name__),
-                    domain="sensor",
-                    platform_name=DOMAIN,
-                    platform=None,
-                    scan_interval=timedelta(seconds=300),
-                    entity_namespace=None,
-                )
-                platform.config_entry = config
+                platform = fixtures.sensor_platform(self.hass, config)
                 entities = []
                 for target in runtime.targets:
                     entities.extend(sensor.Measurement(runtime, target, kind) for kind in ("temperature", "humidity"))
@@ -148,16 +299,7 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_platform_readds_removed_device_without_duplicate_listeners(self):
         config, runtime = await self.make_runtime()
-        platform = EntityPlatform(
-            hass=self.hass,
-            logger=logging.getLogger(__name__),
-            domain="sensor",
-            platform_name=DOMAIN,
-            platform=None,
-            scan_interval=timedelta(seconds=300),
-            entity_namespace=None,
-        )
-        platform.config_entry = config
+        platform = fixtures.sensor_platform(self.hass, config)
         unload = []
 
         def add_entities(entities):

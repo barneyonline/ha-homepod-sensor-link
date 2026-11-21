@@ -2,6 +2,7 @@
 
 import asyncio
 from copy import deepcopy
+import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -9,7 +10,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components import homepod_sensor_link as integration
-from custom_components.homepod_sensor_link import coordinator
+from custom_components.homepod_sensor_link import coordinator, vault as vault_module
 from custom_components.homepod_sensor_link.credentials import DOMAIN
 from custom_components.homepod_sensor_link.engine import AuthenticationFailure, SafetyFailure
 from custom_components.homepod_sensor_link.provisioning import make_owned
@@ -201,6 +202,180 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
+    async def test_activation_write_failure_remains_verified_and_retryable(self):
+        _, runtime = await self.make_runtime(recovery=False)
+        self.backend.read_ha.side_effect = None
+        self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
+        put = self.vault.put
+
+        async def put_record(key, record):
+            if record["phase"] == "active":
+                raise OSError()
+            await put(key, record)
+
+        try:
+            with (
+                patch.object(runtime, "verify_publication", AsyncMock()),
+                patch.object(self.vault, "put", side_effect=put_record),
+                self.assertRaises(OSError),
+            ):
+                await runtime.inspect_pending(self.key)
+            self.assertEqual(runtime.records[self.key]["phase"], "verified")
+            self.assertIn("source", runtime.records[self.key]["target"])
+            self.assertEqual(runtime.records[self.key], self.vault.record(self.key))
+            with patch.object(runtime, "verify_publication", AsyncMock()):
+                self.assertIs(await runtime.inspect_pending(self.key), coordinator.PendingInspection.REPORTS_VERIFIED)
+            self.assertEqual(self.backend.read_ha.await_count, 2)
+            self.assertEqual(self.vault.record(self.key)["phase"], "active")
+            self.assertNotIn("source", self.vault.record(self.key)["target"])
+        finally:
+            await runtime.stop()
+
+    async def test_final_publication_and_recovery_policy_commit_in_order(self):
+        _, runtime = await self.make_runtime()
+        runtime.engine.states[self.key].status = "healthy"
+        target = runtime.records[self.key]["target"]
+        writing, release = asyncio.Event(), asyncio.Event()
+        put = self.vault.put
+
+        async def put_record(key, record):
+            if not writing.is_set():
+                self.assertEqual(record["phase"], "active")
+                writing.set()
+                await release.wait()
+            await put(key, record)
+
+        policy = None
+        with (
+            patch.object(runtime.engine, "check_all", AsyncMock()),
+            patch.object(runtime.audit, "check", AsyncMock()),
+            patch.object(runtime, "verify_publication", AsyncMock()),
+            patch.object(self.vault, "put", side_effect=put_record),
+        ):
+            poll = asyncio.create_task(runtime.update())
+            try:
+                await asyncio.wait_for(writing.wait(), 2)
+                policy = asyncio.create_task(runtime.set_recovery(self.key, False))
+                await asyncio.sleep(0)
+                release.set()
+                await asyncio.wait_for(poll, 2)
+                self.assertTrue(await asyncio.wait_for(policy, 2))
+                record = runtime.records[self.key]
+                self.assertEqual(record, self.vault.record(self.key))
+                self.assertEqual(record["phase"], "active")
+                self.assertFalse(record["target"]["recovery"])
+                self.assertNotIn("source", record["target"])
+                self.assertIs(record["target"], target)
+                self.assertIs(runtime.targets[0], target)
+                self.assertIs(runtime.engine.targets[0], target)
+            finally:
+                release.set()
+                await asyncio.gather(poll, *([policy] if policy else []), return_exceptions=True)
+                await runtime.stop()
+
+    async def test_cancelled_activation_keeps_target_in_sync_with_checkpoint(self):
+        for stage in ("before_write", "final_publication", "pending_inspection"):
+            with self.subTest(stage=stage):
+                _, runtime = await self.make_runtime(recovery=False)
+                runtime.engine.states[self.key].status = "healthy"
+                target = runtime.targets[0]
+                inspecting = stage == "pending_inspection"
+                writing = stage != "before_write"
+                self.backend.read_ha.side_effect = None
+                self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
+                entered, release = asyncio.Event(), threading.Event()
+                loop = asyncio.get_running_loop()
+                write = vault_module._write
+
+                def delayed_write(config_dir, data):
+                    if data["records"][self.key]["phase"] == "active":
+                        loop.call_soon_threadsafe(entered.set)
+                        if not release.wait(5):
+                            raise TimeoutError
+                    write(config_dir, data)
+
+                try:
+                    with (
+                        patch.object(
+                            runtime.engine,
+                            "check_all",
+                            AsyncMock(wraps=runtime.engine.check_all if inspecting else None),
+                        ),
+                        patch.object(runtime.audit, "check", AsyncMock()),
+                        patch.object(runtime, "verify_publication", AsyncMock()),
+                        patch.object(vault_module, "_write", delayed_write),
+                    ):
+                        if writing:
+                            poll = asyncio.create_task(runtime.update())
+                            try:
+                                await asyncio.wait_for(entered.wait(), 2)
+                                for _ in range(2):
+                                    poll.cancel()
+                                    await asyncio.sleep(0)
+                                    self.assertFalse(poll.done())
+                                release.set()
+                                with self.assertRaises(asyncio.CancelledError):
+                                    await poll
+                            finally:
+                                release.set()
+                                await asyncio.gather(poll, return_exceptions=True)
+                        else:
+                            with (
+                                patch.object(self.vault, "put", AsyncMock(side_effect=asyncio.CancelledError)),
+                                self.assertRaises(asyncio.CancelledError),
+                            ):
+                                await runtime.update()
+                    record = self.vault.record(self.key)
+                    self.assertEqual(runtime.records[self.key], record)
+                    self.assertEqual(record["phase"], "active" if writing else "verified")
+                    current_target = runtime.records[self.key]["target"]
+                    if not inspecting:
+                        self.assertIs(current_target, target)
+                    self.assertIs(runtime.engine.targets[0], current_target)
+                    self.assertIs(runtime.targets[0], current_target)
+                    self.assertEqual("source" in current_target, not writing)
+                finally:
+                    await runtime.stop()
+
+    async def test_stop_during_audit_prevents_final_publication(self):
+        _, runtime = await self.make_runtime()
+        runtime.engine.states[self.key].status = "healthy"
+        with (
+            patch.object(runtime.engine, "check_all", AsyncMock()),
+            patch.object(runtime.audit, "check", side_effect=runtime.stop),
+            patch.object(runtime, "finish_publication", AsyncMock()) as finish,
+        ):
+            await runtime.update()
+        finish.assert_not_awaited()
+        self.assertTrue(runtime.closed)
+        self.assertEqual(self.vault.record(self.key)["phase"], "verified")
+
+    async def test_verified_activation_preserves_pending_repair_publication_policy(self):
+        _, runtime = await self.make_runtime(recovery=False)
+        self.backend.read_ha.side_effect = None
+        self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
+        state = runtime.engine.states[self.key]
+        state.status = "repair_failed"
+        state.publication_pending = state.pending_pairing_added = True
+        try:
+            with (
+                patch.object(runtime, "verify_publication", AsyncMock()) as verify_activation,
+                patch.object(runtime.engine, "verify_publication", AsyncMock()) as verify_repair,
+            ):
+                await runtime.update()
+            verify_activation.assert_awaited_once()
+            verify_repair.assert_awaited_once()
+            self.assertEqual(self.backend.read_ha.await_count, 2)
+            self.backend.restore_missing.assert_not_awaited()
+            self.assertEqual(self.vault.record(self.key)["phase"], "active")
+            self.assertEqual(state.status, "publication_pending")
+            persisted = self.vault.data["states"][self.key]
+            self.assertTrue(persisted["publication_pending"])
+            self.assertTrue(persisted["pending_pairing_added"])
+            self.assertEqual(persisted["repairs"], 0)
+        finally:
+            await runtime.stop()
+
     async def test_removal_stop_and_parent_cancel_drain_inflight_inspection(self):
         for operation in ("remove", "stop", "cancel"):
             config, runtime = await self.make_runtime()
@@ -257,6 +432,9 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
             await integration.async_unload_entry(self.hass, config)
         self.assertEqual(self.hass.data[integration.OWNER], "foreign-owner")
         self.hass.data[integration.OWNER] = config.entry_id
+        with patch.object(self.vault, "purge", AsyncMock(side_effect=OSError())), self.assertRaises(OSError):
+            await integration.async_remove_entry(self.hass, config)
+        self.assertEqual(self.hass.data[integration.OWNER], config.entry_id)
         with (
             patch.object(
                 self.hass.config_entries.flow, "async_progress_by_handler", return_value=[{"flow_id": "pending"}]

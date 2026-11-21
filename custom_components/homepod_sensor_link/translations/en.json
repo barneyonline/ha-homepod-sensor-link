@@ -147,6 +147,7 @@
     "abort": {
       "local_admin_required": "Use an authenticated Home Assistant administrator on the local network. Cloud and remote imports are not accepted.",
       "already_configured": "HomePod Sensor Link is already configured. Use Reconfigure to add or manage devices.",
+      "previous_cleanup_failed": "Cleanup of the previous HomePod Sensor Link setup could not finish. Try setting up the integration again.",
       "invalid_selection": "The selected device is not part of this setup.",
       "verification_failed": "No selected device could be prepared. Check the local HAP export, pins and connectivity.",
       "runtime_unavailable": "Load the integration before managing devices.",
