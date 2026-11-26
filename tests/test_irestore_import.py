@@ -63,12 +63,12 @@ def dump(source=None, accessory=None, **encoding):
 
 
 class IrestoreParserTests(unittest.TestCase):
-    def reject(self, value):
+    def reject(self, value, reason="invalid_credential_export"):
         content = json.dumps(value) if not isinstance(value, (str, bytes)) else value
         try:
             parse_export(content)
         except SafetyFailure as error:
-            self.assertEqual(str(error), "invalid_credential_export")
+            self.assertEqual(str(error), reason)
             self.assertIsNone(error.__context__)
             self.assertIsNone(error.__cause__)
             # No inner JSONDecodeError.doc or decoder frame containing the dump.
@@ -145,6 +145,27 @@ class IrestoreParserTests(unittest.TestCase):
             row["_fieldTypes"] = "string,string,[]uint8"
         self.assertEqual(parse_export(json.dumps(data)), expected)
 
+    def test_irestore_empty_parse_record_does_not_block_complete_pairings(self):
+        data = dump()
+        expected = parse_export(json.dumps(data))
+        partial = {"_fieldOrder": "", "_fieldTypes": "", "_class": 6, "_version": 3}
+        data["General"].insert(0, partial)
+        self.assertEqual(parse_export(json.dumps(data)), expected)
+        partial["acct"] = "inconsistent-account"
+        self.reject(data)
+
+    def test_bluetooth_identifier_metadata_is_not_treated_as_a_pairing_key(self):
+        data = dump()
+        expected = parse_export(json.dumps(data))
+        for field, kind in (("svce", "string"), ("labl", "[]uint8"), ("desc", "string")):
+            for length in (16, 32, 64):
+                row = record("bluetooth-identifier", bytes(length))
+                label = "BTLE HomeKit Accessory Identifier"
+                row.update(_fieldOrder=f"{row['_fieldOrder']},{field}", _fieldTypes=f"{row['_fieldTypes']},{kind}")
+                row[field] = label if kind == "string" else b64(label.encode())
+                data["General"].append(row)
+        self.assertEqual(parse_export(json.dumps(data)), expected)
+
     def test_malformed_metadata_and_wrong_field_types_fail_closed(self):
         modifications = [
             {"_fieldOrder": None},
@@ -159,6 +180,7 @@ class IrestoreParserTests(unittest.TestCase):
             {"_fieldTypes": "[]uint8,int64,int64,string"},
             {"_fieldTypes": "[]uint8,int64,string,time.Time"},
             {"_fieldTypes": "[]uint8,string,string,string"},
+            {"_fieldTypes": "[]uint8,bool,string,string", "tomb": False},
             {"acct": 123},
             {"tomb": True},
             {"tomb": "1"},
@@ -171,11 +193,11 @@ class IrestoreParserTests(unittest.TestCase):
                 data = dump()
                 data["General"][0].update(update)
                 self.reject(data)
-        for value in (None, {}, "invalid", [None], [False]):
+        for value in ({}, "invalid", [None], [False]):
             self.reject({"General": value})
-        for field in ("_fieldOrder", "_fieldTypes", "acct", "v_Data"):
+        for field in ("_fieldOrder", "_fieldTypes", "acct", "agrp", "v_Data"):
             data = dump()
-            del data["General"][0][field]
+            del data["General"][1][field]
             self.reject(data)
 
     def test_malformed_base64_utf8_identifiers_lengths_and_key_pairs_fail_closed(self):
@@ -229,21 +251,23 @@ class IrestoreParserTests(unittest.TestCase):
         boundary = text + " " * (MAX_RAW_IMPORT - len(text))
         self.assertEqual(parse_export(boundary), expected)
         self.assertEqual(parse_export(boundary.encode()), expected)
-        self.reject(boundary + " ")
-        self.reject((boundary + " ").encode())
+        self.reject(boundary + " ", "credential_export_too_large")
+        self.reject((boundary + " ").encode(), "credential_export_too_large")
         unicode_dump = dump()
         unicode_dump["Keys"] = "é" * (MAX_RAW_IMPORT // 2)
         unicode_text = json.dumps(unicode_dump, ensure_ascii=False)
         self.assertLess(len(unicode_text), MAX_RAW_IMPORT)
         self.assertGreater(len(unicode_text.encode()), MAX_RAW_IMPORT)
-        self.reject(unicode_text)
+        self.reject(unicode_text, "credential_export_too_large")
         # Normalized and selected CSV imports keep their original byte cap.
         _, _, normalized = fixtures.export_fixture()
         value = json.dumps(normalized)
         self.assertTrue(parse_export(value + " " * (MAX_IMPORT - len(value))))
-        self.reject(value + " " * (MAX_IMPORT + 1 - len(value)))
-        self.reject("Account,Password,App / Group\n" + " " * MAX_IMPORT)
-        self.reject({"General": []})
+        self.reject(value + " " * (MAX_IMPORT + 1 - len(value)), "credential_export_too_large")
+        self.reject("Account,Password,App / Group\n" + " " * MAX_IMPORT, "credential_export_too_large")
+        self.reject({"General": []}, "irestore_no_controller")
+        self.reject({"General": None}, "irestore_no_controller")
+        self.reject({"General": dump()["General"][1:]}, "irestore_no_controller")
         for index in (0, 1):
             data = dump()
             data["General"] = [data["General"][0]] * (64 if index == 0 else 1) + [data["General"][1]] * (
@@ -274,8 +298,28 @@ class IrestoreParserTests(unittest.TestCase):
             f"{source['iOSPairingId']},{source['iOSDeviceLTPK']}{source['iOSDeviceLTSK']},com.apple.hap.pairing\n"
             f"{accessory['accessory_id']},{accessory['accessory_key']},com.apple.hap.pairing\n"
         )
-        for content in (json.dumps(typed), json.dumps(flat), json.dumps({accessory["accessory_id"]: flat}), csv):
+        for content in (
+            json.dumps(typed),
+            json.dumps(flat),
+            json.dumps({accessory["accessory_id"]: flat}),
+            json.dumps({"General": dump(source, accessory)["General"]}),
+            csv,
+        ):
             self.assertEqual(parse_export(content), expected)
+
+    def test_csv_keeps_valid_keys_when_explorer_also_exports_bluetooth_metadata(self):
+        source, accessory, _ = fixtures.export_fixture()
+        controller_key = source["iOSDeviceLTPK"] + source["iOSDeviceLTSK"]
+        group = "com.apple.hap.pairing"
+        expected = parse_export(json.dumps(dump(source, accessory)))
+        for label_column in ("Service", "Label"):
+            csv = (
+                f"Account,Password,App / Group,{label_column}\n"
+                f"{source['iOSPairingId']},{controller_key},{group},HomeKit Pairing Identity Backup\n"
+                f"identifier,16 bytes (binary),{group},BTLE HomeKit Accessory Identifier\n"
+                f"{accessory['accessory_id']},{accessory['accessory_key']},{group},Paired HomeKit Accessory\n"
+            )
+            self.assertEqual(parse_export(csv), expected)
 
 
 class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
@@ -284,6 +328,24 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
     flow_environment = fixtures.OnboardingTests.flow_environment
     finish_flow = fixtures.OnboardingTests.finish_flow
     flow = flow_fixtures.FlowLifecycleTests.flow
+
+    async def test_specific_export_errors_keep_the_form_empty(self):
+        async with self.flow_environment():
+            flow = self.flow()
+            for raw, reason in (
+                (json.dumps({"General": []}), "irestore_no_controller"),
+                ("é" * (MAX_RAW_IMPORT // 2 + 1), "credential_export_too_large"),
+                (
+                    "Account,Password,App / Group\ndisposable,16 bytes (binary),com.apple.hap.pairing\n",
+                    "credential_export_binary_placeholder",
+                ),
+            ):
+                payload = {"credential_export": raw}
+                result = await flow.async_step_credential_export(payload)
+                self.assertEqual(result["errors"], {"base": reason})
+                self.assertEqual(payload, {})
+                self.assertIsNone(flow._imported)
+                self.assertNotIn("default", str(result["data_schema"].schema))
 
     async def test_large_dump_uses_existing_form_and_retains_only_normalized_hap_state(self):
         manager = self.hass.config_entries.flow
@@ -320,6 +382,7 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_selected_device_only_persists_validated_source_and_user_identity(self):
         flow = self.flow()
         data = dump(self.source, self.accessory)
+        data["General"].insert(0, {"_fieldOrder": "", "_fieldTypes": "", "_class": 6, "_version": 3})
         data["General"].append(record("unselected-accessory", b"a" * 32))
         data["General"].append(record("unrelated-account", b"UNRELATED-PRIVATE-PASSWORD", group="other.group"))
         async with self.flow_environment() as backend:

@@ -14,7 +14,8 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug fixes
 
-- None
+- Import irestore exports with empty records or Bluetooth identifier metadata alongside HomeKit keys, and skip Bluetooth identifier metadata in selected CSV exports.
+- Explain credential import failures caused by oversized exports, CSV byte-count placeholders or missing HomeKit controller identities.
 
 ### 🔧 Improvements
 

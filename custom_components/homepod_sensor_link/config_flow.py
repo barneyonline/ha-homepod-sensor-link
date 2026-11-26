@@ -22,7 +22,7 @@ from .onboarding import discover_devices, controller_session
 from .provisioning import prepare
 import uuid
 from .engine import SafetyFailure
-from .importer import parse_export
+from .importer import CredentialExportError, parse_export
 from .ui import local_admin
 from .vault import get_vault
 
@@ -268,11 +268,13 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_verify()
         if self._imported is not None:
             return await self._credentials_ready()
-        errors = {}
+        errors: dict[str, str] = {}
         if user_input is not None:
             try:
                 self._imported = parse_export(user_input.pop("credential_export", "").encode("utf-8"))
-            except (SafetyFailure, UnicodeError):
+            except CredentialExportError as error:
+                errors["base"] = error.code
+            except UnicodeError:
                 errors["base"] = "invalid_credential_export"
             else:
                 return await self._credentials_ready()
