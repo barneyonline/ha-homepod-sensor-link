@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Troubleshooting-and-Support
+    about: Find help with discovery, credential import, missing sensor readings and recovery.
+  - name: Security reporting guidance
+    url: https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/SECURITY.md
+    about: Follow the security policy to request a private reporting channel.

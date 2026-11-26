@@ -48,13 +48,6 @@ body:
         - Enabled
         - Disabled
         - Not yet configured
-  - type: textarea
-    id: reproduction
-    attributes:
-      label: Reproduction and expected/actual behaviour
-      description: Include controlled diagnostic status/error categories, without raw payloads or credentials.
-    validations:
-      required: true
   - type: dropdown
     id: area
     attributes:
@@ -74,3 +67,16 @@ body:
         - Need help preparing safe evidence
         - Provided below after privacy review
         - Not available
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Diagnostic details
+      description: If you selected “Provided below after privacy review”, enter the relevant status or error category here. Leave this blank if you are unsure what is safe to share.
+      render: text
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and expected/actual behaviour
+      description: Include controlled diagnostic status/error categories, without raw payloads or credentials.
+    validations:
+      required: true

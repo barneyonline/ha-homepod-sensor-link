@@ -1,0 +1,21 @@
+name: Documentation feedback
+description: Point out missing, outdated or unclear instructions
+title: "[Docs]: "
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, exports, device identifiers or private setup details.
+  - type: input
+    id: page
+    attributes:
+      label: Page and section
+      description: Link to the affected page or name the guide where you expected to find the information.
+    validations:
+      required: true
+  - type: textarea
+    id: feedback
+    attributes:
+      label: What should the documentation explain or correct?
+      description: Describe where you got stuck or what changed. Include suggested wording if you have it.
+    validations:
+      required: true

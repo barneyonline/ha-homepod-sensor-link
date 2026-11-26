@@ -15,12 +15,16 @@ name: Missing Diagnostic Evidence Guidance
         type: string
 permissions:
   contents: read
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: false
 jobs:
   metadata:
-    if: ${{ github.repository == 'barneyonline/ha-homepod-sensor-link' }}
+    if: >-
+      ${{ github.repository == 'barneyonline/ha-homepod-sensor-link' &&
+          ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+           github.event.label.name == 'status/needs-diagnostics') }}
+    # Unrelated label events must skip this job before joining the issue's queue.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.issue.number || github.run_id }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
