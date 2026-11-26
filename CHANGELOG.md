@@ -14,6 +14,28 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug fixes
 
+- None
+
+### 🔧 Improvements
+
+- None
+
+### 🔄 Other changes
+
+- None
+
+## v1.3.0 - 2026-11-27
+
+### 🚧 Breaking changes
+
+- None
+
+### ✨ New features
+
+- None
+
+### 🐛 Bug fixes
+
 - Import irestore exports with empty records or Bluetooth identifier metadata alongside HomeKit keys, and skip Bluetooth identifier metadata in selected CSV exports.
 - Explain credential import failures caused by oversized exports, CSV placeholders, invalid irestore pairing records or missing controller identities and accessory records.
 
@@ -23,7 +45,8 @@ All notable changes to this project will be documented in this file.
 
 ### 🔄 Other changes
 
-- None
+- Add GitHub issue forms for documentation feedback and support questions, and apply labels based on the issue type and selected area.
+- Set the integration manifest and project version to `1.3.0`.
 
 ## v1.2.1 - 2026-11-22
 
