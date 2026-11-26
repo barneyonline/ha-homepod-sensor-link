@@ -63,7 +63,7 @@ def dump(source=None, accessory=None, **encoding):
 
 
 class IrestoreParserTests(unittest.TestCase):
-    def reject(self, value, reason="invalid_credential_export"):
+    def reject(self, value, reason="irestore_invalid_records"):
         content = json.dumps(value) if not isinstance(value, (str, bytes)) else value
         try:
             parse_export(content)
@@ -220,9 +220,9 @@ class IrestoreParserTests(unittest.TestCase):
         data = dump()
         data["General"][0]["v_Data"] = b64(base64.b64decode(data["General"][0]["v_Data"])[::-1])
         self.reject(data)
-        self.reject('{"General": [], "General": []}')
-        self.reject('{"General": ["unrelated-private-secret"')
-        self.reject('{"General":' + "[" * 2000)
+        self.reject('{"General": [], "General": []}', "invalid_credential_export")
+        self.reject('{"General": ["unrelated-private-secret"', "invalid_credential_export")
+        self.reject('{"General":' + "[" * 2000, "invalid_credential_export")
 
     def test_identical_duplicates_deduplicate_but_conflicting_pins_and_identities_fail(self):
         data = dump()
@@ -362,11 +362,14 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
             await manager.async_configure(flow_id, {"devices": [self.target["accessory_id"]]})
             await manager.async_configure(flow_id, {"recovery_devices": [self.target["accessory_id"]]})
             await manager.async_configure(flow_id, {"next_step_id": "credential_export"})
-            # Exercise an invalid retry through HA's actual schema and manager.
-            result = await manager.async_configure(flow_id, {"credential_export": '{"General":"PRIVATE-INVALID"'})
-            self.assertEqual(result["errors"], {"base": "invalid_credential_export"})
-            self.assertNotIn("PRIVATE-INVALID", str(vars(flow)))
-            self.assertIsNone(flow._imported)
+            for export, reason in (
+                ('{"General":"PRIVATE-INVALID"', "invalid_credential_export"),
+                ('{"General":"PRIVATE-INVALID"}', "irestore_invalid_records"),
+            ):
+                result = await manager.async_configure(flow_id, {"credential_export": export})
+                self.assertEqual(result["errors"], {"base": reason})
+                self.assertNotIn("PRIVATE-INVALID", str(vars(flow)))
+                self.assertIsNone(flow._imported)
             with patch.object(
                 flow, "_begin", AsyncMock(return_value=flow.async_show_menu(step_id="credentials", menu_options=[]))
             ):
@@ -409,6 +412,35 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("unselected-accessory", text)
                 self.assertNotIn("UNRELATED-PRIVATE-PASSWORD", text)
                 self.assertNotIn("_fieldOrder", text)
+
+    async def test_missing_accessory_record_has_specific_error_when_resuming(self):
+        flow = self.flow()
+        identifier = self.target["accessory_id"]
+        controller = dump(self.source, self.accessory)["General"][0]
+        async with self.flow_environment() as backend:
+            await flow.async_step_user()
+            await flow.async_step_devices({"devices": [identifier]})
+            await flow.async_step_policy({"recovery_devices": [identifier]})
+            result = await self.finish_flow(
+                flow,
+                await flow.async_step_credential_export({"credential_export": json.dumps({"General": [controller]})}),
+            )
+            self.assertEqual(result["type"], FlowResultType.CREATE_ENTRY)
+            config = fixtures.entry(result["data"])
+            records = self.vault.records()
+            (key,) = result["data"]["device_keys"]
+            self.assertEqual(records[key]["phase"], "needs_credentials")
+            self.assertEqual(records[key]["error"], "accessory_pin_required")
+            backend.inspect_recovery.assert_not_called()
+            backend.restore_missing.assert_not_called()
+
+            self.hass.config_entries._entries[config.entry_id] = config
+            config.runtime_data = SimpleNamespace(stopped=False, records=records)
+            manage_flow = self.flow("reconfigure", config)
+            await manage_flow.async_step_manage({"device": key})
+            form = await manage_flow.async_step_manage_resume()
+            self.assertEqual(form["errors"], {"base": "accessory_pin_required"})
+            self.assertEqual((await manage_flow.async_step_manage_resume({}))["step_id"], "credentials")
 
     async def test_import_cannot_bypass_existing_administrator_permission_validation(self):
         flow = self.flow()

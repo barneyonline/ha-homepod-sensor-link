@@ -34,6 +34,7 @@ type _ExportErrorCode = Literal[
     "credential_export_too_large",
     "credential_export_binary_placeholder",
     "irestore_no_controller",
+    "irestore_invalid_records",
 ]
 
 
@@ -186,10 +187,13 @@ def _parse_export(content: bytes | str) -> Data:
 
         data = json.loads(text, object_pairs_hook=pairs)
         if "General" in data:
-            controllers, accessories = _irestore_records(data)
-        elif size > MAX_IMPORT:
+            try:
+                return _normalize_credentials(*_irestore_records(data))
+            except (KeyError, TypeError, ValueError):
+                raise CredentialExportError("irestore_invalid_records") from None
+        if size > MAX_IMPORT:
             raise CredentialExportError("credential_export_too_large")
-        elif "iOSDeviceLTSK" in data:
+        if "iOSDeviceLTSK" in data:
             controllers = [{k: data[k] for k in ("iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK") if k in data}]
             if "AccessoryPairingID" in data:
                 accessories = [{k: data[k] for k in ("AccessoryPairingID", "AccessoryLTPK")}]
@@ -244,6 +248,14 @@ def _parse_export(content: bytes | str) -> Data:
                 accessories.append({"AccessoryPairingID": identifier, "AccessoryLTPK": value})
             else:
                 raise ValueError
+    result = _normalize_credentials(controllers, accessories)
+    if hosts:
+        result["discovery_hosts"] = list(hosts)[:64]
+    return result
+
+
+def _normalize_credentials(controllers: list[Data], accessories: list[Data]) -> Data:
+    """Validate pairing records shared by all export formats."""
     if (
         not isinstance(controllers, list)
         or not isinstance(accessories, list)
@@ -276,7 +288,4 @@ def _parse_export(content: bytes | str) -> Data:
             raise ValueError
         pins[identifier] = public
         raw_ids[identifier] = raw
-    result = {"controllers": list(identities.values()), "accessories": pins, "accessory_identifiers": raw_ids}
-    if hosts:
-        result["discovery_hosts"] = list(hosts)[:64]
-    return result
+    return {"controllers": list(identities.values()), "accessories": pins, "accessory_identifiers": raw_ids}

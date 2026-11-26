@@ -96,7 +96,7 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 {**valid, "controller_private_key": "not-a-key"},
             ):
                 result = await flow.async_step_credential_manual(invalid)
-                self.assertEqual(result["errors"], {"base": "invalid_credential_export"})
+                self.assertEqual(result["errors"], {"base": "invalid_manual_credentials"})
                 self.assertIsNone(flow._imported)
                 self.assertNotIn(self.source["iOSDeviceLTSK"], str(result))
                 self.assertNotIn("default", str(result["data_schema"].schema))
