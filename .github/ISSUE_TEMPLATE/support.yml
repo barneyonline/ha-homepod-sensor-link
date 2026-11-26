@@ -1,0 +1,41 @@
+name: Setup and usage help
+description: Ask for help with installation, discovery, credential import, sensors or recovery
+title: "[Support]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [troubleshooting guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Troubleshooting-and-Support) for common problems.
+        Never share controller keys, pairing exports, backups, Home Assistant storage, IP addresses, device identifiers or unreviewed logs.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Discovery and onboarding
+        - Measurements and monitoring
+        - Recovery and lifecycle
+        - Documentation and automations
+        - Other or not sure
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you need help with?
+      description: Describe what you want to do, where you got stuck and what you have tried so far.
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: HomePod Sensor Link version
+      description: If installed, enter the version shown in HACS or the integration details.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+  - type: input
+    id: homepod
+    attributes:
+      label: HomePod model and software version
