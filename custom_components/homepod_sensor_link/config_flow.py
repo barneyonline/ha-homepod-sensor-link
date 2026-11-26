@@ -19,10 +19,10 @@ from . import async_finish_removed_entry_cleanup
 from .backend import HomeKitBackend
 from .credentials import DOMAIN, public_targets
 from .onboarding import discover_devices, controller_session
-from .provisioning import prepare
+from .provisioning import AccessoryPinRequired, prepare
 import uuid
 from .engine import SafetyFailure
-from .importer import parse_export
+from .importer import CredentialExportError, parse_export
 from .ui import local_admin
 from .vault import get_vault
 
@@ -268,11 +268,13 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_verify()
         if self._imported is not None:
             return await self._credentials_ready()
-        errors = {}
+        errors: dict[str, str] = {}
         if user_input is not None:
             try:
                 self._imported = parse_export(user_input.pop("credential_export", "").encode("utf-8"))
-            except (SafetyFailure, UnicodeError):
+            except CredentialExportError as error:
+                errors["base"] = error.code
+            except UnicodeError:
                 errors["base"] = "invalid_credential_export"
             else:
                 return await self._credentials_ready()
@@ -317,7 +319,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ).encode("utf-8")
                 )
             except SafetyFailure:
-                errors["base"] = "invalid_credential_export"
+                errors["base"] = "invalid_manual_credentials"
             else:
                 return await self._credentials_ready()
         return self.async_show_form(
@@ -386,7 +388,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 required_key=required_key,
                             )
                             results.extend(keys)
-                    except Exception:
+                    except Exception as error:
                         # Keep a visible, resumable per-device failure while
                         # preserving every successful device and existing pin.
                         previous = self._vault.record_for_accessory(
@@ -403,7 +405,11 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             "phase": phase,
                             "flow_id": self.flow_id,
                         }
-                        record["error"] = "verification_failed"
+                        record["error"] = (
+                            "accessory_pin_required"
+                            if isinstance(error, AccessoryPinRequired)
+                            else "verification_failed"
+                        )
                         key = record["target"]["entry_id"]
                         if await self._vault.put(key, record, require_existing=required_key is not None):
                             results.append(key)
@@ -561,7 +567,9 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if record["phase"] == "transition_required" and action != "remove":
             return self.async_abort(reason="explicit_transition_required")
         errors = {}
-        if user_input is not None and action == "remove" and not user_input.get("confirm"):
+        if user_input is None and action == "resume" and record.get("error") == "accessory_pin_required":
+            errors["base"] = "accessory_pin_required"
+        elif user_input is not None and action == "remove" and not user_input.get("confirm"):
             errors["base"] = "confirm_removal"
         elif user_input is not None:
             try:

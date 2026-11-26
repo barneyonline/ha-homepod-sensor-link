@@ -17,6 +17,10 @@ from .engine import AuthenticationFailure, SafetyFailure, RecoveryPaused
 BOOT = "homepod_sensor_link.boot"
 
 
+class AccessoryPinRequired(SafetyFailure):
+    """The export lacks a pairing pin for a selected accessory."""
+
+
 def boot_id(hass: HomeAssistant) -> str:
     return cast(str, hass.data.setdefault(BOOT, uuid.uuid4().hex))
 
@@ -84,7 +88,7 @@ async def prepare(
         else:
             public = imported.get("accessories", {}).get(identifier.lower())
             if not public:
-                raise SafetyFailure("accessory_pin_required")
+                raise AccessoryPinRequired("accessory_pin_required")
             raw_id = imported.get("accessory_identifiers", {}).get(identifier.lower(), identifier)
             target = make_owned(raw_id, public, discovered[identifier].get("endpoint", {}))
         if previous and "ha_key" not in previous["target"]:

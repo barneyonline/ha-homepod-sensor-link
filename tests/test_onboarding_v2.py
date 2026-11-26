@@ -111,22 +111,28 @@ class ImportParserTests(unittest.TestCase):
         source, accessory, _ = export_fixture()
         csv = "Title,Date,Account,Password,App / Group,Body\n"
         csv += f"Identity,,{source['iOSPairingId']},{source['iOSDeviceLTPK']}{source['iOSDeviceLTSK']},com.apple.hap.pairing,\n"
+        csv += "BTLE HomeKit Accessory Identifier,,,16 bytes (binary),com.apple.hap.pairing,\n"
         csv += f"Accessory,,{accessory['accessory_id']},{accessory['accessory_key']},com.apple.hap.pairing,\n"
         parsed = parse_export(csv.encode())
         self.assertEqual(parsed["controllers"], [source])
         self.assertEqual(parsed["accessories"], {accessory["accessory_id"]: accessory["accessory_key"]})
+        titled_controller = csv.replace("Identity,,", "BTLE HomeKit Accessory Identifier,,", 1)
+        self.assertEqual(parse_export(titled_controller.encode()), parsed)
 
     def test_binary_placeholder_unrelated_passwords_duplicates_and_size_refused(self):
         invalid = [
-            "x" * (MAX_IMPORT + 1),
-            '{"controllers":[],"controllers":[],"accessories":[]}',
-            "Account,Password,App / Group\nidentity,32 bytes (binary),com.apple.hap.pairing\n",
-            "Account,Password,App / Group\nidentity,password,unrelated.group\n",
+            ("x" * (MAX_IMPORT + 1), "credential_export_too_large"),
+            ('{"controllers":[],"controllers":[],"accessories":[]}', "invalid_credential_export"),
+            (
+                "Account,Password,App / Group\nidentity,32 bytes (binary),com.apple.hap.pairing\n",
+                "credential_export_binary_placeholder",
+            ),
+            ("Account,Password,App / Group\nidentity,password,unrelated.group\n", "invalid_credential_export"),
         ]
-        for value in invalid:
+        for value, reason in invalid:
             with self.subTest(length=len(value)), self.assertRaises(SafetyFailure) as error:
                 parse_export(value)
-            self.assertEqual(str(error.exception), "invalid_credential_export")
+            self.assertEqual(str(error.exception), reason)
 
     def test_public_pins_never_contain_owned_private_key(self):
         target = make_owned("disposable", "ab" * 32, {"AccessoryIP": "192.0.2.1", "AccessoryPort": 12345})

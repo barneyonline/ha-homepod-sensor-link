@@ -53,14 +53,14 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
         async with self.flow_environment():
             flow = self.flow()
             flow._selected = [self.target["accessory_id"]]
-            for content in (
-                "invalid " + self.source["iOSDeviceLTSK"],
-                "x" * (MAX_IMPORT + 1),
-                "é" * MAX_IMPORT,
-                "\ud800",
+            for content, reason in (
+                ("invalid " + self.source["iOSDeviceLTSK"], "invalid_credential_export"),
+                ("x" * (MAX_IMPORT + 1), "credential_export_too_large"),
+                ("é" * MAX_IMPORT, "credential_export_too_large"),
+                ("\ud800", "invalid_credential_export"),
             ):
                 result = await flow.async_step_credential_export({"credential_export": content})
-                self.assertEqual(result["errors"], {"base": "invalid_credential_export"})
+                self.assertEqual(result["errors"], {"base": reason})
                 self.assertIsNone(flow._imported)
                 self.assertNotIn(self.source["iOSDeviceLTSK"], str(result))
                 self.assertNotIn("default", str(result["data_schema"].schema))
@@ -96,7 +96,7 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 {**valid, "controller_private_key": "not-a-key"},
             ):
                 result = await flow.async_step_credential_manual(invalid)
-                self.assertEqual(result["errors"], {"base": "invalid_credential_export"})
+                self.assertEqual(result["errors"], {"base": "invalid_manual_credentials"})
                 self.assertIsNone(flow._imported)
                 self.assertNotIn(self.source["iOSDeviceLTSK"], str(result))
                 self.assertNotIn("default", str(result["data_schema"].schema))

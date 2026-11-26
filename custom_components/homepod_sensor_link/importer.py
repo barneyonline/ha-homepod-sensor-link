@@ -1,7 +1,7 @@
 """Parse explicit user exports. No keychain access, network or secret logging."""
 
 from __future__ import annotations
-from typing import Any
+from typing import Any, Literal
 from .models import Data
 
 
@@ -10,6 +10,7 @@ import csv
 import io
 import json
 from ipaddress import ip_address
+import re
 
 from .credentials import _public
 from .engine import SafetyFailure
@@ -22,6 +23,27 @@ MAX_RAW_IMPORT = 2 * 1024 * 1024
 CONTROLLER_FIELDS = {"iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK"}
 PAIRING_FIELDS = CONTROLLER_FIELDS | {"AccessoryPairingID", "AccessoryLTPK"}
 TRANSPORT_FIELDS = {"AccessoryIP", "AccessoryIPs", "AccessoryPort", "Connection"}
+_BTLE_LABEL = "BTLE HomeKit Accessory Identifier"
+_IRESTORE_BTLE_LABELS = (
+    ("string", _BTLE_LABEL),
+    ("[]uint8", base64.b64encode(_BTLE_LABEL.encode("ascii")).decode("ascii")),
+)
+_CSV_BINARY_PLACEHOLDER = re.compile(r"[0-9]+ bytes \(binary\)")
+type _ExportErrorCode = Literal[
+    "invalid_credential_export",
+    "credential_export_too_large",
+    "credential_export_binary_placeholder",
+    "irestore_no_controller",
+    "irestore_invalid_records",
+]
+
+
+class CredentialExportError(SafetyFailure):
+    """An export rejection with a fixed, user-facing error code."""
+
+    def __init__(self, code: _ExportErrorCode) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 def discovery_hosts(record: Data) -> list[str]:
@@ -86,6 +108,9 @@ def _irestore_bytes(record: Data, fields: dict[str, str], name: str) -> bytes:
 def _irestore_records(data: Data) -> tuple[list[Data], list[Data]]:
     """Discard other categories/groups before reading any account or key data."""
     records = data["General"]
+    if records is None:
+        # irestore marshals an empty Go slice as JSON null.
+        records = []
     if not isinstance(records, list):
         raise ValueError
     controllers: list[Data] = []
@@ -93,6 +118,11 @@ def _irestore_records(data: Data) -> tuple[list[Data], list[Data]]:
     for record in records:
         if not isinstance(record, dict):
             raise ValueError
+        if record.get("_fieldOrder") == record.get("_fieldTypes") == "" and all(
+            name.startswith("_") for name in record
+        ):
+            # parseRecord can emit metadata only when ASN.1 decoding fails.
+            continue
         fields = _irestore_fields(record)
         if "agrp" not in fields or _irestore_bytes(record, fields, "agrp") != b"com.apple.hap.pairing":
             continue
@@ -101,6 +131,9 @@ def _irestore_records(data: Data) -> tuple[list[Data], list[Data]]:
                 raise ValueError
             if record["tomb"] == 1:
                 continue
+        if any((fields.get(name), record.get(name)) in _IRESTORE_BTLE_LABELS for name in ("svce", "labl", "desc")):
+            # A BLE identifier is metadata, even if its length matches a key.
+            continue
         identifier = _irestore_bytes(record, fields, "acct").decode("utf-8")
         value = _irestore_bytes(record, fields, "v_Data")
         if len(value) == 64:
@@ -111,28 +144,33 @@ def _irestore_records(data: Data) -> tuple[list[Data], list[Data]]:
             accessories.append({"AccessoryPairingID": identifier, "AccessoryLTPK": value.hex()})
         else:
             raise ValueError
+    if not controllers:
+        raise CredentialExportError("irestore_no_controller")
     return controllers, accessories
 
 
 def parse_export(content: bytes | str) -> Data:
     """Return normalized HAP credentials or an error carrying no decoder context."""
+    code: _ExportErrorCode = "invalid_credential_export"
     try:
         return _parse_export(content)
+    except CredentialExportError as error:
+        code = error.code
     except Exception:
         pass
     # Do not attach JSONDecodeError.doc, decoder tracebacks or the dump to the
     # outward exception. The only frame exposed here has no raw input left.
     content = b""
-    raise SafetyFailure("invalid_credential_export")
+    raise CredentialExportError(code)
 
 
 def _parse_export(content: bytes | str) -> Data:
     """Parse typed/aiohomekit JSON, selected HAP CSV, or native irestore JSON."""
     if len(content) > MAX_RAW_IMPORT:
-        raise ValueError
+        raise CredentialExportError("credential_export_too_large")
     size = len(content) if isinstance(content, bytes) else len(content.encode("utf-8"))
     if size > MAX_RAW_IMPORT:
-        raise ValueError
+        raise CredentialExportError("credential_export_too_large")
     text = content.decode("utf-8-sig") if isinstance(content, bytes) else content
     controllers: list[Data] = []
     accessories: list[Data] = []
@@ -149,10 +187,13 @@ def _parse_export(content: bytes | str) -> Data:
 
         data = json.loads(text, object_pairs_hook=pairs)
         if "General" in data:
-            controllers, accessories = _irestore_records(data)
-        elif size > MAX_IMPORT:
-            raise ValueError
-        elif "iOSDeviceLTSK" in data:
+            try:
+                return _normalize_credentials(*_irestore_records(data))
+            except (KeyError, TypeError, ValueError):
+                raise CredentialExportError("irestore_invalid_records") from None
+        if size > MAX_IMPORT:
+            raise CredentialExportError("credential_export_too_large")
+        if "iOSDeviceLTSK" in data:
             controllers = [{k: data[k] for k in ("iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK") if k in data}]
             if "AccessoryPairingID" in data:
                 accessories = [{k: data[k] for k in ("AccessoryPairingID", "AccessoryLTPK")}]
@@ -184,7 +225,7 @@ def _parse_export(content: bytes | str) -> Data:
                 hosts.update(dict.fromkeys(discovery_hosts(record)))
     else:
         if size > MAX_IMPORT:
-            raise ValueError
+            raise CredentialExportError("credential_export_too_large")
         reader = csv.DictReader(io.StringIO(text))
         if not {"Account", "Password", "App / Group"} <= set(reader.fieldnames or []):
             raise ValueError
@@ -192,6 +233,13 @@ def _parse_export(content: bytes | str) -> Data:
             if row["App / Group"] != "com.apple.hap.pairing":
                 raise ValueError
             value, identifier = row["Password"], row["Account"]
+            # Backup Explorer puts a label-only item in Title instead of Label.
+            if _BTLE_LABEL in (row.get("Service"), row.get("Label")) or (
+                not identifier and row.get("Title") == _BTLE_LABEL
+            ):
+                continue
+            if _CSV_BINARY_PLACEHOLDER.fullmatch(value or ""):
+                raise CredentialExportError("credential_export_binary_placeholder")
             if len(value) == 128:
                 controllers.append(
                     {"iOSPairingId": identifier, "iOSDeviceLTPK": value[:64], "iOSDeviceLTSK": value[64:]}
@@ -200,6 +248,14 @@ def _parse_export(content: bytes | str) -> Data:
                 accessories.append({"AccessoryPairingID": identifier, "AccessoryLTPK": value})
             else:
                 raise ValueError
+    result = _normalize_credentials(controllers, accessories)
+    if hosts:
+        result["discovery_hosts"] = list(hosts)[:64]
+    return result
+
+
+def _normalize_credentials(controllers: list[Data], accessories: list[Data]) -> Data:
+    """Validate pairing records shared by all export formats."""
     if (
         not isinstance(controllers, list)
         or not isinstance(accessories, list)
@@ -232,7 +288,4 @@ def _parse_export(content: bytes | str) -> Data:
             raise ValueError
         pins[identifier] = public
         raw_ids[identifier] = raw
-    result = {"controllers": list(identities.values()), "accessories": pins, "accessory_identifiers": raw_ids}
-    if hosts:
-        result["discovery_hosts"] = list(hosts)[:64]
-    return result
+    return {"controllers": list(identities.values()), "accessories": pins, "accessory_identifiers": raw_ids}
