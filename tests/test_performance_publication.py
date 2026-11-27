@@ -60,12 +60,12 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
         self.backend.read_ha.reset_mock(side_effect=True, return_value=True)
         self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
         record_copies: list[int] = []
-        phases = {key: [] for key in records}
-        put = self.vault.put
+        snapshots = []
+        write = vault_module._write
 
-        async def record_checkpoint(key, record):
-            phases[key].append(record["phase"])
-            return await put(key, record)
+        def record_checkpoint(config_dir, data):
+            write(config_dir, data)
+            snapshots.append({key: record["phase"] for key, record in data["records"].items()})
 
         def count_record_copy(value):
             if isinstance(value, dict):
@@ -83,16 +83,17 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
         try:
             with (
                 patch.object(vault_module, "deepcopy", side_effect=count_record_copy),
-                patch.object(self.vault, "put", side_effect=record_checkpoint),
-                patch.object(vault_module, "_write", wraps=vault_module._write) as write,
+                patch.object(vault_module, "_write", side_effect=record_checkpoint) as committed,
                 patch.object(vault_module.os, "fsync", wraps=vault_module.os.fsync) as fsync,
             ):
                 snapshot = await runtime.update()
                 self.assertEqual(self.backend.read_ha.await_count, count)
                 self.assertEqual(record_copies, [1] * (3 * count))
-                self.assertEqual(write.call_count, 2 * count + 1)
-                self.assertEqual(fsync.call_count, 4 * count + 2)
-                self.assertEqual(phases, {key: ["verified", "active"] for key in records})
+                self.assertEqual(committed.call_count, 3)
+                self.assertEqual(fsync.call_count, 6)
+                self.assertEqual(
+                    snapshots, [dict.fromkeys(records, phase) for phase in ("verified", "active", "active")]
+                )
             restored = await Vault(self.hass).load()
             self.assertEqual(set(snapshot), set(records))
             for key, record in restored.records().items():
@@ -135,11 +136,11 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                 await platform.async_add_entities([temperature, humidity])
                 committed, release = asyncio.Event(), asyncio.Event()
                 reads = []
-                put = self.vault.put
+                checkpoint = self.vault.checkpoint
                 elapsed = 0
 
-                async def put_record(key, record):
-                    await put(key, record)
+                async def commit_record(key, record):
+                    await checkpoint(key, record)
                     if key == self.key and record["phase"] == "active":
                         committed.set()
 
@@ -152,7 +153,7 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
 
                 self.backend.read_ha.side_effect = read
                 with (
-                    patch.object(self.vault, "put", side_effect=put_record),
+                    patch.object(self.vault, "checkpoint", side_effect=commit_record),
                     patch.object(coordinator, "monotonic", lambda: elapsed),
                 ):
                     poll = asyncio.create_task(runtime.update())

@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 
 import asyncio
 from copy import deepcopy
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from .secure_storage import _directory, _read_at
 
 DOMAIN = "homepod_sensor_link"
 DATA_FILE = ".storage/homepod_sensor_link/data.json"
+MAX_RECORDS = 64
 
 
 def _write(config_dir: str, data: Data) -> None:
@@ -86,12 +88,25 @@ async def async_drain_future[T](future: asyncio.Future[T]) -> asyncio.CancelledE
     return cancellation
 
 
+@dataclass(repr=False)
+class _CheckpointBatch:
+    records: dict[str, Record]
+    task: asyncio.Task[None] = field(init=False)
+
+    async def wait(self) -> None:
+        cancellation = await async_drain_future(self.task)
+        self.task.result()
+        if cancellation is not None:
+            raise cancellation
+
+
 class Vault:
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
         self.lock = asyncio.Lock()
         self._data: Data | None = None
         self._accessory_index: tuple[dict[str, Record], dict[str, list[str]]] | None = None
+        self._checkpoint_batch: _CheckpointBatch | None = None
 
     @property
     def data(self) -> Data:
@@ -165,11 +180,36 @@ class Vault:
             # Vault-owned entries are replaced under the lock. Shared records
             # and states stay unchanged until the executor finishes serializing.
             updated = {**records, key: deepcopy(record)}
-            if len(updated) > 64:
+            if len(updated) > MAX_RECORDS:
                 raise SafetyFailure("inventory_capacity")
             index = self._index_after_put(key, record)
             await self._commit({**self.data, "records": updated}, index)
             return True
+
+    async def checkpoint(self, key: str, record: Record) -> None:
+        """Share a durable commit among ready onboarding transitions."""
+        batch = self._checkpoint_batch
+        if batch is not None and key not in batch.records:
+            batch.records[key] = deepcopy(record)
+        else:
+            # A later transition of the same device needs its own durable commit.
+            batch = self._checkpoint_batch = _CheckpointBatch({key: deepcopy(record)})
+            # Enter the lock queue now, and collect distinct devices until
+            # this writer starts. All callers wait for the commit to drain.
+            batch.task = asyncio.create_task(self._commit_checkpoints(batch), eager_start=True)
+        await batch.wait()
+
+    async def _commit_checkpoints(self, batch: _CheckpointBatch) -> None:
+        async with self.lock:
+            await asyncio.sleep(0)  # Let other ready devices join even when the lock was free.
+            if self._checkpoint_batch is batch:
+                self._checkpoint_batch = None
+            records = cast(dict[str, Record], self.data["records"])
+            if not batch.records.keys() <= records.keys():
+                raise SafetyFailure("configured_inventory_changed")
+            if len(records) > MAX_RECORDS:
+                raise SafetyFailure("inventory_capacity")
+            await self._commit({**self.data, "records": {**records, **batch.records}})
 
     def _index_after_put(self, key: str, record: Record) -> dict[str, list[str]] | None:
         records = self.data["records"]

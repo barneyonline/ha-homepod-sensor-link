@@ -206,17 +206,17 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         _, runtime = await self.make_runtime(recovery=False)
         self.backend.read_ha.side_effect = None
         self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
-        put = self.vault.put
+        checkpoint = self.vault.checkpoint
 
-        async def put_record(key, record):
+        async def commit_record(key, record):
             if record["phase"] == "active":
                 raise OSError()
-            await put(key, record)
+            await checkpoint(key, record)
 
         try:
             with (
                 patch.object(runtime, "verify_publication", AsyncMock()),
-                patch.object(self.vault, "put", side_effect=put_record),
+                patch.object(self.vault, "checkpoint", side_effect=commit_record),
                 self.assertRaises(OSError),
             ):
                 await runtime.inspect_pending(self.key)
@@ -236,21 +236,21 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         runtime.engine.states[self.key].status = "healthy"
         target = runtime.records[self.key]["target"]
         writing, release = asyncio.Event(), asyncio.Event()
-        put = self.vault.put
+        checkpoint = self.vault.checkpoint
 
-        async def put_record(key, record):
+        async def commit_record(key, record):
             if not writing.is_set():
                 self.assertEqual(record["phase"], "active")
                 writing.set()
                 await release.wait()
-            await put(key, record)
+            await checkpoint(key, record)
 
         policy = None
         with (
             patch.object(runtime.engine, "check_all", AsyncMock()),
             patch.object(runtime.audit, "check", AsyncMock()),
             patch.object(runtime, "verify_publication", AsyncMock()),
-            patch.object(self.vault, "put", side_effect=put_record),
+            patch.object(self.vault, "checkpoint", side_effect=commit_record),
         ):
             poll = asyncio.create_task(runtime.update())
             try:
@@ -321,7 +321,7 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
                                 await asyncio.gather(poll, return_exceptions=True)
                         else:
                             with (
-                                patch.object(self.vault, "put", AsyncMock(side_effect=asyncio.CancelledError)),
+                                patch.object(self.vault, "checkpoint", AsyncMock(side_effect=asyncio.CancelledError)),
                                 self.assertRaises(asyncio.CancelledError),
                             ):
                                 await runtime.update()

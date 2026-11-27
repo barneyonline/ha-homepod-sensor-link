@@ -1,5 +1,6 @@
 """Native irestore v0.4.0 imports using generated, disposable credentials only."""
 
+import asyncio
 import base64
 from copy import deepcopy
 import json
@@ -9,13 +10,14 @@ import stat
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from homeassistant.components.http.server import MAX_CLIENT_SIZE
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
 from homeassistant.helpers.selector import TextSelector, TextSelectorConfig
 
 from custom_components.homepod_sensor_link import config_flow, importer
@@ -551,6 +553,82 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
     flow_environment = fixtures.OnboardingTests.flow_environment
     finish_flow = fixtures.OnboardingTests.finish_flow
     flow = flow_fixtures.FlowLifecycleTests.flow
+
+    async def test_large_paste_parses_off_loop_before_continuing_the_flow(self):
+        loop = asyncio.get_running_loop()
+        event_loop_thread = threading.get_ident()
+        started, release = asyncio.Event(), threading.Event()
+        data = dump(self.source, self.accessory)
+        data["Internet"] = [{"v_Data": "x" * (MAX_RAW_IMPORT - 1024)}]
+        content = "\ufeff" + json.dumps(data)
+        self.assertGreater(len(content.encode("utf-8")), 2 * 1024 * 1024)
+
+        def parse(value):
+            if threading.get_ident() == event_loop_thread:
+                started.set()
+                return parse_export(value)
+            loop.call_soon_threadsafe(started.set)
+            self.assertTrue(release.wait(5))
+            return parse_export(value)
+
+        async with self.flow_environment():
+            flow = self.flow()
+            ready = AsyncMock(return_value={"type": "test"})
+            with patch.object(config_flow, "parse_export", parse), patch.object(flow, "_credentials_ready", ready):
+                submission = asyncio.create_task(flow.async_step_credential_export({"credential_export": content}))
+                try:
+                    await asyncio.wait_for(started.wait(), 2)
+                    self.assertFalse(submission.done())
+                    self.assertIsNone(flow._imported)
+                    ready.assert_not_awaited()
+                finally:
+                    release.set()
+                    await submission
+            ready.assert_awaited_once()
+            self.assertEqual(flow._imported, parse_export(json.dumps({"General": data["General"]})))
+
+    async def test_aborted_or_cancelled_paste_cannot_stage_credentials(self):
+        loop = asyncio.get_running_loop()
+        for abort in (True, False):
+            with self.subTest(abort=abort):
+                started, release = asyncio.Event(), threading.Event()
+
+                def parse(value):
+                    loop.call_soon_threadsafe(started.set)
+                    self.assertTrue(release.wait(5))
+                    return parse_export(value)
+
+                async with self.flow_environment():
+                    flow = self.flow()
+                    ready = AsyncMock()
+                    content = json.dumps(dump(self.source, self.accessory)) if abort else "invalid"
+                    with (
+                        patch.object(config_flow, "parse_export", parse),
+                        patch.object(flow, "_credentials_ready", ready),
+                    ):
+                        submission = asyncio.create_task(
+                            flow.async_step_credential_export({"credential_export": content})
+                        )
+                        try:
+                            await asyncio.wait_for(started.wait(), 2)
+                            if abort:
+                                flow.async_remove()
+                            else:
+                                for _ in range(2):
+                                    submission.cancel()
+                                    await asyncio.sleep(0)
+                                    self.assertFalse(submission.done())
+                            release.set()
+                            with self.assertRaises(UnknownFlow if abort else asyncio.CancelledError):
+                                await submission
+                            if abort:
+                                with self.assertRaises(UnknownFlow):
+                                    await flow.async_step_credential_export()
+                        finally:
+                            release.set()
+                            await asyncio.gather(submission, return_exceptions=True)
+                    ready.assert_not_awaited()
+                    self.assertIsNone(flow._imported)
 
     async def test_specific_export_errors_keep_the_form_empty(self):
         unsupported = text_dump(self.source, self.accessory)

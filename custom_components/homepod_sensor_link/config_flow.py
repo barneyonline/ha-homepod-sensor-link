@@ -1,10 +1,12 @@
 """Discover, import and commission dedicated controllers through one administrator-owned flow."""
 
 from __future__ import annotations
+from contextlib import suppress
 from typing import cast
 from .models import Data, ProvisioningBackend
 from homeassistant.auth.models import User
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
+from homeassistant.data_entry_flow import UnknownFlow
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 
@@ -24,7 +26,7 @@ import uuid
 from .engine import SafetyFailure
 from .importer import CredentialExportError, parse_export
 from .ui import local_admin
-from .vault import get_vault
+from .vault import async_drain_future, get_vault
 
 
 def choices(options: dict[str, str], multiple: bool = False, *, dropdown: bool = False) -> selector.SelectSelector:
@@ -46,6 +48,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._force_validate = False
         self._owner: str | None = None
         self._imported: Data | None = None
+        self._export_lock = asyncio.Lock()
+        self._removed = False
         self._discovery_hosts: list[str] = []
         self._selected: list[str] = []
         self._selected_keys: dict[str, str] = {}
@@ -262,22 +266,31 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_credential_export(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
-        # Access can yield on the vault lock. Reuse any task started meanwhile
-        # before parsing or replacing the credentials it is still using.
-        if hasattr(self, "_task"):
-            return await self.async_step_verify()
-        if self._imported is not None:
-            return await self._credentials_ready()
         errors: dict[str, str] = {}
-        if user_input is not None:
-            try:
-                self._imported = parse_export(user_input.pop("credential_export", "").encode("utf-8"))
-            except CredentialExportError as error:
-                errors["base"] = error.code
-            except UnicodeError:
-                errors["base"] = "invalid_credential_export"
-            else:
+        async with self._export_lock:
+            if self._removed:
+                raise UnknownFlow
+            if hasattr(self, "_task"):
+                return await self.async_step_verify()
+            if self._imported is not None:
                 return await self._credentials_ready()
+            if user_input is not None:
+                worker = self.hass.async_add_executor_job(parse_export, user_input.pop("credential_export", ""))
+                try:
+                    imported = await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    # A requester can retry while the executor is still
+                    # reading the previous submission. Keep it serialized.
+                    with suppress(CredentialExportError):
+                        await async_drain_future(worker)
+                    raise
+                except CredentialExportError as error:
+                    errors["base"] = error.code
+                else:
+                    if self._removed:
+                        raise UnknownFlow
+                    self._imported = imported
+                    return await self._credentials_ready()
         return self.async_show_form(
             step_id="credential_export",
             description_placeholders={
@@ -616,6 +629,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def async_remove(self) -> None:
+        self._removed = True
         self._imported = None
         if not self._committed and hasattr(self, "_vault"):
             self.hass.async_create_background_task(

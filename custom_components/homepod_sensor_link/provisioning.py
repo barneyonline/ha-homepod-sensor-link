@@ -177,7 +177,7 @@ class Provisioner:
         else:
             record.update(phase="verified", error=None)
             record.pop("authorised_boot", None)
-            await self.vault.put(key, record)
+            await self.vault.checkpoint(key, record)
             return record, values
         initial_authorisation = record.pop("authorised_boot", None) == self.boot
         allowed = (resume or initial_authorisation) and not record.get("commissioned")

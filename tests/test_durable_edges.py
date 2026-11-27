@@ -24,6 +24,97 @@ class DurableEdgeTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
 
+    async def test_cancelled_checkpoint_joiner_drains_shared_write_before_purge(self):
+        peer = "disposable-peer"
+        await self.vault.put(self.key, self.record)
+        await self.vault.put(peer, self.record)
+        loop = asyncio.get_running_loop()
+        entered, release = asyncio.Event(), threading.Event()
+        write = vault_module._write
+        snapshots = []
+
+        def blocked(config_dir, data):
+            snapshots.append({key: record["phase"] for key, record in data["records"].items()})
+            loop.call_soon_threadsafe(entered.set)
+            self.assertTrue(release.wait(5))
+            write(config_dir, data)
+
+        verified = {**self.record, "phase": "verified"}
+        with patch.object(vault_module, "_write", blocked):
+            async with self.vault.lock:
+                owner = asyncio.create_task(self.vault.checkpoint(self.key, verified))
+                await asyncio.sleep(0)
+                joiner = asyncio.create_task(self.vault.checkpoint(peer, verified))
+                await asyncio.sleep(0)
+            purge = None
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                self.assertEqual(snapshots, [{self.key: "verified", peer: "verified"}])
+                purge = asyncio.create_task(self.vault.purge())
+                for _ in range(2):
+                    joiner.cancel()
+                    await asyncio.sleep(0)
+                    self.assertFalse(joiner.done())
+                    self.assertFalse(purge.done())
+                release.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await joiner
+                await owner
+                await purge
+            finally:
+                release.set()
+                await asyncio.gather(owner, joiner, *([purge] if purge else []), return_exceptions=True)
+        self.assertEqual(self.vault.records(), {})
+
+    async def test_same_device_checkpoints_are_separate_and_missing_record_stays_removed(self):
+        await self.vault.put(self.key, self.record)
+        verified = {**self.record, "phase": "verified"}
+        active = {**self.record, "phase": "active"}
+        with patch.object(vault_module, "_write", wraps=vault_module._write) as write:
+            await asyncio.gather(self.vault.checkpoint(self.key, verified), self.vault.checkpoint(self.key, active))
+            self.assertEqual(
+                [args[1]["records"][self.key]["phase"] for args, _ in write.call_args_list],
+                [
+                    "verified",
+                    "active",
+                ],
+            )
+        self.assertEqual((await vault_module.Vault(self.hass).load()).record(self.key), active)
+        await self.vault.remove(self.key)
+        with self.assertRaisesRegex(SafetyFailure, "configured_inventory_changed"):
+            await self.vault.checkpoint(self.key, active)
+        self.assertEqual((await vault_module.Vault(self.hass).load()).records(), {})
+
+    async def test_checkpoint_failure_preserves_previous_snapshot_and_allows_retry(self):
+        peer = "disposable-peer"
+        await self.vault.put(self.key, self.record)
+        await self.vault.put(peer, self.record)
+        verified = {**self.record, "phase": "verified"}
+        with patch.object(vault_module, "_write", side_effect=OSError) as write:
+            failed = await asyncio.gather(
+                self.vault.checkpoint(self.key, verified), self.vault.checkpoint(peer, verified), return_exceptions=True
+            )
+            write.assert_called_once()
+            self.assertEqual([type(error) for error in failed], [OSError, OSError])
+        prepared = dict.fromkeys((self.key, peer), self.record)
+        self.assertEqual(self.vault.records(), prepared)
+        self.assertEqual((await vault_module.Vault(self.hass).load()).records(), prepared)
+        await asyncio.gather(self.vault.checkpoint(self.key, verified), self.vault.checkpoint(peer, verified))
+        self.assertEqual(
+            (await vault_module.Vault(self.hass).load()).records(), dict.fromkeys((self.key, peer), verified)
+        )
+
+    async def test_checkpoint_rejects_an_oversized_previous_inventory(self):
+        records = {f"disposable-{index}": self.record for index in range(vault_module.MAX_RECORDS)}
+        records[self.key] = self.record
+        self.vault.data["records"] = records
+        with (
+            patch.object(vault_module, "_write") as write,
+            self.assertRaisesRegex(SafetyFailure, "inventory_capacity"),
+        ):
+            await self.vault.checkpoint(self.key, {**self.record, "phase": "verified"})
+        write.assert_not_called()
+
     async def test_cancelled_write_drains_before_purge_can_acquire_lock(self):
         entered, release = threading.Event(), threading.Event()
         write = vault_module._write

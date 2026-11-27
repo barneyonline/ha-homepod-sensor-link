@@ -402,7 +402,7 @@ class Runtime:
         vault = cast(Vault, self.vault)
         cancellation = None
         try:
-            await vault.put(key, active)
+            await vault.checkpoint(key, active)
         except asyncio.CancelledError as error:
             # A cancelled vault write can still commit while its executor drains.
             if vault.record(key) != active:
