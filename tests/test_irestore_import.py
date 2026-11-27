@@ -3,7 +3,12 @@
 import base64
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import stat
+import subprocess
+import sys
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -320,6 +325,60 @@ class IrestoreParserTests(unittest.TestCase):
                 f"{accessory['accessory_id']},{accessory['accessory_key']},{group},Paired HomeKit Accessory\n"
             )
             self.assertEqual(parse_export(csv), expected)
+
+
+class IrestoreReductionTests(unittest.TestCase):
+    def run_reducer(self, source):
+        script = Path(__file__).resolve().parents[1] / "scripts/reduce_irestore_export.py"
+        return subprocess.run([sys.executable, script, source], capture_output=True, text=True, check=False)
+
+    def test_reduces_oversized_dump_to_an_importable_private_copy(self):
+        source_identity, accessory, _ = fixtures.export_fixture()
+        data = dump(source_identity, accessory, byte_group=True)
+        data["General"][0] = dump(source_identity, accessory)["General"][0]
+        expected = parse_export(json.dumps(data))
+        data["Internet"] = [{"v_Data": "unrelated-synthetic-password" + "x" * MAX_RAW_IMPORT}]
+        data["General"].append(record("unrelated-account", b"unrelated-key", group="other.group"))
+        # This string resembles an encoded HomeKit group, but its declared type is string.
+        data["General"].append(record("unrelated-lookalike", b"unrelated-key", group=b64(b"com.apple.hap.pairing")))
+        raw = json.dumps(data).encode()
+        with self.assertRaisesRegex(SafetyFailure, "credential_export_too_large"):
+            parse_export(raw)
+
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "keychain.json"
+            source.write_bytes(raw)
+            result = self.run_reducer(source)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (output,) = source.parent.glob("homepod-irestore-*.json")
+            self.assertIn(output.name, result.stdout)
+            self.assertEqual(source.read_bytes(), raw)
+            self.assertEqual(parse_export(output.read_bytes()), expected)
+            self.assertEqual(json.loads(output.read_bytes()), {"General": data["General"][:2]})
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+            self.assertNotIn("unrelated-synthetic-password", result.stdout + result.stderr)
+            again = self.run_reducer(source)
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertEqual(len(list(source.parent.glob("homepod-irestore-*.json"))), 2)
+
+    def test_invalid_empty_and_still_oversized_exports_never_create_output(self):
+        large = dump()
+        large["General"][0]["_wkey"] = "x" * MAX_RAW_IMPORT
+        for raw, message in (
+            ('{"General":["sensitive-synthetic-value"', "could not read"),
+            ('{"General":[],"General":[]}', "could not read"),
+            ('{"General":null}', "No HomeKit"),
+            (json.dumps(large), "2 MiB"),
+        ):
+            with self.subTest(message=message), TemporaryDirectory() as directory:
+                source = Path(directory) / "keychain.json"
+                source.write_text(raw, encoding="utf-8")
+                result = self.run_reducer(source)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn("sensitive-synthetic-value", result.stdout + result.stderr)
+                self.assertEqual(list(source.parent.iterdir()), [source])
 
 
 class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):

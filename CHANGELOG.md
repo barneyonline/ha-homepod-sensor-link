@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug fixes
 
-- None
+- Provide a local tool to reduce oversized irestore keychain exports to HomeKit pairing records before import.
 
 ### 🔧 Improvements
 

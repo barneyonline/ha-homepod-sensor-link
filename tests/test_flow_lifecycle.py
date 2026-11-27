@@ -46,7 +46,13 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
             fields = manual["data_schema"].schema
             self.assertEqual(fields["controller_private_key"].config["type"], TextSelectorType.PASSWORD)
             self.assertEqual(fields["controller_private_key"].config["autocomplete"], "off")
-            self.assertIsNone(export.get("description_placeholders"))
+            self.assertEqual(
+                export["description_placeholders"],
+                {
+                    "irestore_reduction_url": "https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/"
+                    "SECURITY.md#reduce-an-oversized-irestore-export"
+                },
+            )
             self.assertIsNone(manual.get("description_placeholders"))
 
     async def test_native_export_rejects_invalid_and_utf8_oversize_without_echo_then_retries(self):

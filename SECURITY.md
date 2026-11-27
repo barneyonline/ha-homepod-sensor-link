@@ -13,6 +13,18 @@ Controller administrator identities can authorise pairing changes. HomePod Senso
 - No `homepod_recovery` wrapper or migration is included. The integration neither reads nor deletes `homepod_recovery` storage. Competing recovery engines are blocked rather than run concurrently.
 - Never commit real private/public controller keys, pairing bundles, accessory/controller IDs, native entry IDs, live addresses, household mappings, logs, diagnostics, exports or HA storage. Use generated disposable identities and documentation-only endpoints in tests. Curated diagnostics use anonymous ordinals and controlled status/error metadata; they omit raw exception messages, payloads, names, addresses and sensitive locals.
 
+## Reduce an oversized irestore export
+
+Keep `keychain.json` in the private local folder used for the irestore export. From a HomePod Sensor Link source checkout, run this command with Python 3 and replace the example path.
+
+```sh
+python3 scripts/reduce_irestore_export.py "/path/to/keychain.json"
+```
+
+On Windows, use `py -3` in place of `python3` and supply the Windows path. The script creates a compact `homepod-irestore-….json` alongside the source containing only records in the declared HomeKit pairing group. Open the new file locally and paste its contents into the Home Assistant credential form for key and identity validation. Keep both files private and dispose of export copies after setup. The same [selected-record import steps](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction#import-selected-records-from-irestore) are available for manual reduction.
+
+## Direct macOS extraction
+
 The optional macOS extraction procedure temporarily disables SIP/AMFI. The user-run `scripts/macos_homekit_wizard.sh` builds our bundled Swift helper against Apple frameworks before security changes, saves original boot arguments, and signs/runs the helper only after explicit confirmation. No third-party packages are downloaded. The helper queries only generic-password items in `com.apple.hap.pairing`, explicitly using the data-protection keychain so access-group filtering applies. Its signing entitlements contain only that group. It implements no keychain writes or legacy-keychain fallback, validates controller key pairs before rendering, and refuses credential output to a terminal, pipe, shared or hard-linked file. Its harmless help/query-description modes never access a keychain.
 
 The wizard stores the dump and selected JSON in an owner-only folder outside the repository and blocks JSON export until SIP, the original NVRAM value and the running kernel's boot arguments pass restoration checks. It then reads the private dump automatically, rejects incomplete or conflicting records, and lists only identifiers for numbered selection. Keys are never printed or requested as terminal input. A sole record is selected automatically; multiple records require an explicit selection, bounded to three controller identities and 64 accessories. Only selected credentials enter the generated 0600 JSON file. After saving, syncing and reading back the JSON, the wizard records its filename and both file digests before removing the temporary dump. Failed writes or verification retain the dump; interrupted cleanup can resume using the recorded JSON without copying keys again. Changed files, links or unsafe permissions block cleanup. Signing certificates and original HomeKit keychain records are not deleted. After HA setup succeeds, delete the JSON or move it to secure encrypted storage, and clear copied credentials from the clipboard.

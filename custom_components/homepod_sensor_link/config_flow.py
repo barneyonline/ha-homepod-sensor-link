@@ -280,6 +280,10 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self._credentials_ready()
         return self.async_show_form(
             step_id="credential_export",
+            description_placeholders={
+                "irestore_reduction_url": "https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/"
+                "SECURITY.md#reduce-an-oversized-irestore-export"
+            },
             data_schema=vol.Schema(
                 {
                     vol.Required("credential_export"): selector.TextSelector(
