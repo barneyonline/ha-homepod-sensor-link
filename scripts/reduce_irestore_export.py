@@ -9,7 +9,7 @@ from tempfile import NamedTemporaryFile
 
 HAP_GROUP = "com.apple.hap.pairing"
 GROUP_VALUES = {"string": HAP_GROUP, "[]uint8": base64.b64encode(HAP_GROUP.encode("ascii")).decode("ascii")}
-MAX_IMPORT_BYTES = 2 * 1024 * 1024  # Native irestore JSON limit in the Home Assistant form.
+MAX_IMPORT_BYTES = 6 * 1024 * 1024  # Native irestore JSON limit in the Home Assistant form.
 
 
 def unique_fields(pairs):
@@ -63,7 +63,7 @@ def main():
         print("No HomeKit pairing group records were found in the irestore export.", file=sys.stderr)
         return 1
     if len(content) > MAX_IMPORT_BYTES:
-        print("The HomeKit records still exceed 2 MiB. Select the records for the intended HomePods.", file=sys.stderr)
+        print("The HomeKit records still exceed 6 MiB. Select the records for the intended HomePods.", file=sys.stderr)
         return 1
 
     try:

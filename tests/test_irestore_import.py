@@ -284,9 +284,10 @@ class IrestoreParserTests(unittest.TestCase):
 
     def test_actual_ha_text_and_request_limits_leave_room_for_json_escaping(self):
         selector = TextSelector(TextSelectorConfig(multiline=True, autocomplete="off"))
-        raw = "\x00" * MAX_RAW_IMPORT
+        document = '{"General":[]}'
+        raw = document + "\n" * (MAX_RAW_IMPORT - len(document))
         self.assertEqual(selector(raw), raw)
-        request = json.dumps({"credential_export": raw}).encode()
+        request = json.dumps({"credential_export": raw}, ensure_ascii=False).encode("utf-8")
         self.assertLess(len(request), MAX_CLIENT_SIZE)
         self.assertEqual(MAX_CLIENT_SIZE, 16 * 1024 * 1024)
 
@@ -369,7 +370,7 @@ class IrestoreReductionTests(unittest.TestCase):
             ('{"General":["sensitive-synthetic-value"', "could not read"),
             ('{"General":[],"General":[]}', "could not read"),
             ('{"General":null}', "No HomeKit"),
-            (json.dumps(large), "2 MiB"),
+            (json.dumps(large), "6 MiB"),
         ):
             with self.subTest(message=message), TemporaryDirectory() as directory:
                 source = Path(directory) / "keychain.json"
@@ -409,7 +410,9 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_large_dump_uses_existing_form_and_retains_only_normalized_hap_state(self):
         manager = self.hass.config_entries.flow
         data = dump(self.source, self.accessory, byte_account=True, byte_group=True)
-        data["Internet"] = "UNRELATED-PRIVATE-PASSWORD" * 10000
+        data["Internet"] = [{"v_Data": "UNRELATED-PRIVATE-PASSWORD" + "x" * (3 * 1024 * 1024)}]
+        content = json.dumps(data)
+        self.assertGreater(len(content.encode("utf-8")), 2 * 1024 * 1024)
         async with self.flow_environment():
             with patch(
                 "homeassistant.config_entries._async_get_flow_handler",
@@ -432,8 +435,9 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(
                 flow, "_begin", AsyncMock(return_value=flow.async_show_menu(step_id="credentials", menu_options=[]))
             ):
-                result = await manager.async_configure(flow_id, {"credential_export": json.dumps(data)})
-            self.assertEqual(flow._imported, parse_export(json.dumps(data)))
+                result = await manager.async_configure(flow_id, {"credential_export": content})
+            self.assertEqual(result["type"], FlowResultType.MENU)
+            self.assertEqual(flow._imported, parse_export(json.dumps({"General": data["General"]})))
             self.assertNotIn("UNRELATED-PRIVATE-PASSWORD", str(vars(flow)))
             self.assertNotIn("_fieldOrder", str(vars(flow)))
             self.assertNotIn(self.source["iOSDeviceLTSK"], str(result))
