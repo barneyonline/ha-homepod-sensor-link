@@ -24,6 +24,76 @@ class DurableEdgeTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
 
+    async def test_shutdown_cancellation_cannot_overtake_protected_write_with_purge(self):
+        await self.vault.put(self.key, self.record)
+        loop = asyncio.get_running_loop()
+        entered, release = asyncio.Event(), threading.Event()
+        write = vault_module._write
+
+        def blocked(config_dir, data):
+            loop.call_soon_threadsafe(entered.set)
+            self.assertTrue(release.wait(5))
+            write(config_dir, data)
+
+        verified = {**self.record, "phase": "verified"}
+        with patch.object(vault_module, "_write", blocked):
+            checkpoint = self.hass.async_create_task(self.vault.checkpoint(self.key, verified))
+            purge = None
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                # HA cancels background executor futures directly on stop.
+                for future in tuple(self.hass._background_tasks):
+                    if not isinstance(future, asyncio.Task):
+                        future.cancel()
+                purge = asyncio.create_task(self.vault.purge())
+                for _ in range(4):
+                    await asyncio.sleep(0)
+                self.assertFalse(checkpoint.done())
+                self.assertFalse(purge.done())
+                release.set()
+                await checkpoint
+                await purge
+            finally:
+                release.set()
+                await asyncio.gather(checkpoint, *([purge] if purge else []), return_exceptions=True)
+        self.assertFalse((Path(self.directory.name) / vault_module.DATA_FILE).exists())
+
+    async def test_later_checkpoint_cannot_join_batch_ahead_of_an_earlier_put(self):
+        peer = "disposable-peer"
+        await self.vault.put(self.key, self.record)
+        await self.vault.put(peer, self.record)
+        verified = {**self.record, "phase": "verified"}
+        reconfigured = {**self.record, "name": "Updated HomePod"}
+        with patch.object(vault_module, "_write", wraps=vault_module._write) as write:
+            async with self.vault.lock:
+                first = asyncio.create_task(self.vault.checkpoint(self.key, verified))
+                await asyncio.sleep(0)
+                normal = asyncio.create_task(self.vault.put(peer, reconfigured))
+                await asyncio.sleep(0)
+                last = asyncio.create_task(self.vault.checkpoint(peer, {**reconfigured, "phase": "verified"}))
+                await asyncio.sleep(0)
+            await asyncio.gather(first, normal, last)
+        self.assertEqual(
+            [args[1]["records"][peer] for args, _ in write.call_args_list],
+            [self.record, reconfigured, {**reconfigured, "phase": "verified"}],
+        )
+        self.assertEqual(self.vault.record(peer)["phase"], "verified")
+
+    async def test_cancelling_only_queued_checkpoint_withdraws_it_before_any_write(self):
+        await self.vault.put(self.key, self.record)
+        verified = {**self.record, "phase": "verified"}
+        with patch.object(vault_module, "_write", wraps=vault_module._write) as write:
+            async with self.vault.lock:
+                checkpoint = asyncio.create_task(self.vault.checkpoint(self.key, verified))
+                await asyncio.sleep(0)
+                checkpoint.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(checkpoint, 2)
+            # Drain the now-empty batch in FIFO order.
+            async with self.vault.lock:
+                write.assert_not_called()
+        self.assertEqual(self.vault.record(self.key), self.record)
+
     async def test_cancelled_checkpoint_joiner_drains_shared_write_before_purge(self):
         peer = "disposable-peer"
         await self.vault.put(self.key, self.record)

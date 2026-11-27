@@ -441,9 +441,14 @@ class Runtime:
             if self.vault:
                 async with self.engine.lock:
                     if self.engine.is_active():
-                        for key, record in self.records.items():
-                            if record["phase"] == "verified" and self.engine.states[key].status == "healthy":
-                                await self.finish_publication(key)
+                        async with asyncio.TaskGroup() as group:
+                            await asyncio.gather(
+                                *(
+                                    group.create_task(self.finish_publication(key))
+                                    for key, record in self.records.items()
+                                    if record["phase"] == "verified" and self.engine.states[key].status == "healthy"
+                                )
+                            )
         return self.engine.snapshot()
 
     async def _check_devices(self) -> None:

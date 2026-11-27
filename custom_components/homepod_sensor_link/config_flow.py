@@ -48,7 +48,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._force_validate = False
         self._owner: str | None = None
         self._imported: Data | None = None
-        self._export_lock = asyncio.Lock()
+        self._credentials_lock = asyncio.Lock()
         self._removed = False
         self._discovery_hosts: list[str] = []
         self._selected: list[str] = []
@@ -251,31 +251,45 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(step_id="credentials", menu_options=["credential_export", "credential_manual"])
 
     async def async_step_import_missing(self, user_input: Data | None = None) -> ConfigFlowResult:
+        step = self.cur_step
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
-        if hasattr(self, "_task"):
-            return await self.async_step_verify()
-        # The empty-state action explicitly requests a fresh export. Search
-        # again keeps the staged import; verification must keep it immutable.
-        self._imported = None
-        self._discovery_hosts = []
-        self._selected = []
-        self._selected_keys.clear()
-        return await self.async_step_credential_export()
+        async with self._credentials_lock:
+            if current := self._updated_step(step):
+                return current
+            if hasattr(self, "_task"):
+                return await self.async_step_verify()
+            # The empty-state action explicitly requests a fresh export.
+            # Searching again keeps the import staged for verification.
+            self._imported = None
+            self._discovery_hosts = []
+            self._selected = []
+            self._selected_keys.clear()
+            return self._credential_export_form({})
+
+    def _updated_step(self, original: ConfigFlowResult | None) -> ConfigFlowResult | None:
+        if self._removed:
+            raise UnknownFlow
+        # HA may dispatch multiple requests using the same current step. A
+        # queued request should reflect the latest result without replaying it.
+        current = self.cur_step
+        return current if current is not original else None
 
     async def async_step_credential_export(self, user_input: Data | None = None) -> ConfigFlowResult:
+        step = self.cur_step
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
         errors: dict[str, str] = {}
-        async with self._export_lock:
-            if self._removed:
-                raise UnknownFlow
+        async with self._credentials_lock:
+            if current := self._updated_step(step):
+                return current
             if hasattr(self, "_task"):
                 return await self.async_step_verify()
             if self._imported is not None:
                 return await self._credentials_ready()
             if user_input is not None:
-                worker = self.hass.async_add_executor_job(parse_export, user_input.pop("credential_export", ""))
+                worker = self.hass.loop.run_in_executor(None, parse_export, user_input.pop("credential_export", ""))
+                imported = None
                 try:
                     imported = await asyncio.shield(worker)
                 except asyncio.CancelledError:
@@ -286,11 +300,14 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     raise
                 except CredentialExportError as error:
                     errors["base"] = error.code
-                else:
-                    if self._removed:
-                        raise UnknownFlow
+                if current := self._updated_step(step):
+                    return current
+                if imported is not None:
                     self._imported = imported
                     return await self._credentials_ready()
+        return self._credential_export_form(errors)
+
+    def _credential_export_form(self, errors: dict[str, str]) -> ConfigFlowResult:
         return self.async_show_form(
             step_id="credential_export",
             description_placeholders={
@@ -308,37 +325,41 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_credential_manual(self, user_input: Data | None = None) -> ConfigFlowResult:
+        step = self.cur_step
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
-        if hasattr(self, "_task"):
-            return await self.async_step_verify()
-        if self._imported is not None:
-            return await self._credentials_ready()
         errors = {}
-        if user_input is not None:
-            source = {
-                "iOSPairingId": user_input.get("controller_id", ""),
-                "iOSDeviceLTSK": user_input.get("controller_private_key", ""),
-            }
-            accessory = user_input.get("accessory_id", "")
-            pin = user_input.get("accessory_public_key", "")
-            try:
-                if bool(accessory) != bool(pin):
-                    raise SafetyFailure("invalid_credential_export")
-                self._imported = parse_export(
-                    json.dumps(
-                        {
-                            "controllers": [source],
-                            "accessories": [{"AccessoryPairingID": accessory, "AccessoryLTPK": pin}]
-                            if accessory
-                            else [],
-                        }
-                    ).encode("utf-8")
-                )
-            except SafetyFailure:
-                errors["base"] = "invalid_manual_credentials"
-            else:
+        async with self._credentials_lock:
+            if current := self._updated_step(step):
+                return current
+            if hasattr(self, "_task"):
+                return await self.async_step_verify()
+            if self._imported is not None:
                 return await self._credentials_ready()
+            if user_input is not None:
+                source = {
+                    "iOSPairingId": user_input.get("controller_id", ""),
+                    "iOSDeviceLTSK": user_input.get("controller_private_key", ""),
+                }
+                accessory = user_input.get("accessory_id", "")
+                pin = user_input.get("accessory_public_key", "")
+                try:
+                    if bool(accessory) != bool(pin):
+                        raise SafetyFailure("invalid_credential_export")
+                    self._imported = parse_export(
+                        json.dumps(
+                            {
+                                "controllers": [source],
+                                "accessories": [{"AccessoryPairingID": accessory, "AccessoryLTPK": pin}]
+                                if accessory
+                                else [],
+                            }
+                        ).encode("utf-8")
+                    )
+                except SafetyFailure:
+                    errors["base"] = "invalid_manual_credentials"
+                else:
+                    return await self._credentials_ready()
         return self.async_show_form(
             step_id="credential_manual",
             data_schema=vol.Schema(
@@ -369,6 +390,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self._begin()
 
     async def _begin(self) -> ConfigFlowResult:
+        if self._removed:
+            raise UnknownFlow
         if not hasattr(self, "_task"):
             self._progress = False
             self._task = self.hass.async_create_background_task(self._prepare(), "HomePod onboarding", eager_start=True)

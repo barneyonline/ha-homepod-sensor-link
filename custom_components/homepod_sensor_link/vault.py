@@ -1,6 +1,8 @@
 """Atomic private onboarding journal. No core config storage is edited."""
 
 from __future__ import annotations
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import cast
 from .models import Data, Record, Snapshot
 from homeassistant.core import HomeAssistant
@@ -92,12 +94,7 @@ async def async_drain_future[T](future: asyncio.Future[T]) -> asyncio.CancelledE
 class _CheckpointBatch:
     records: dict[str, Record]
     task: asyncio.Task[None] = field(init=False)
-
-    async def wait(self) -> None:
-        cancellation = await async_drain_future(self.task)
-        self.task.result()
-        if cancellation is not None:
-            raise cancellation
+    sealed: bool = False
 
 
 class Vault:
@@ -169,11 +166,20 @@ class Vault:
             raise asyncio.CancelledError
 
     async def _commit(self, data: Data, index: dict[str, list[str]] | None = None) -> None:
-        task = self.hass.async_add_executor_job(_write, self.hass.config.config_dir, data)
+        # Own the completion future. HA's shutdown cancels tracked executor
+        # futures directly, which can leave the underlying thread running.
+        task = self.hass.loop.run_in_executor(None, _write, self.hass.config.config_dir, data)
         await self._finish_io(task, data, index)
 
-    async def put(self, key: str, record: Record, *, require_existing: bool = False) -> bool:
+    @asynccontextmanager
+    async def _exclusive_write(self) -> AsyncIterator[None]:
+        # A new checkpoint must queue behind an intervening mutation.
+        self._checkpoint_batch = None
         async with self.lock:
+            yield
+
+    async def put(self, key: str, record: Record, *, require_existing: bool = False) -> bool:
+        async with self._exclusive_write():
             records = self.data["records"]
             if require_existing and key not in records:
                 return False
@@ -195,15 +201,25 @@ class Vault:
             # A later transition of the same device needs its own durable commit.
             batch = self._checkpoint_batch = _CheckpointBatch({key: deepcopy(record)})
             # Enter the lock queue now, and collect distinct devices until
-            # this writer starts. All callers wait for the commit to drain.
+            # this writer starts.
             batch.task = asyncio.create_task(self._commit_checkpoints(batch), eager_start=True)
-        await batch.wait()
+        try:
+            await asyncio.shield(batch.task)
+        except asyncio.CancelledError:
+            if batch.sealed:
+                await async_drain_future(batch.task)
+            else:
+                del batch.records[key]
+            raise
 
     async def _commit_checkpoints(self, batch: _CheckpointBatch) -> None:
         async with self.lock:
             await asyncio.sleep(0)  # Let other ready devices join even when the lock was free.
             if self._checkpoint_batch is batch:
                 self._checkpoint_batch = None
+            if not batch.records:
+                return
+            batch.sealed = True
             records = cast(dict[str, Record], self.data["records"])
             if not batch.records.keys() <= records.keys():
                 raise SafetyFailure("configured_inventory_changed")
@@ -223,7 +239,7 @@ class Vault:
         return {**index, identifier: [*index.get(identifier, ()), key]}
 
     async def remove(self, key: str) -> None:
-        async with self.lock:
+        async with self._exclusive_write():
             data = deepcopy(self.data)
             data["records"].pop(key, None)
             data["states"].pop(key, None)
@@ -231,7 +247,7 @@ class Vault:
 
     async def rename(self, key: str, name: str) -> bool:
         """Merge optional metadata without replacing newer credential/policy state."""
-        async with self.lock:
+        async with self._exclusive_write():
             if key not in self.data["records"]:
                 return False
             data = deepcopy(self.data)
@@ -240,14 +256,14 @@ class Vault:
             return True
 
     async def save_states(self, states: Snapshot) -> None:
-        async with self.lock:
+        async with self._exclusive_write():
             # Inventory mutations replace their own copies under this lock.
             # Keep unchanged credentials shared; isolate the caller's state.
             data = {**self.data, "states": deepcopy(states)}
             await self._commit(data)
 
     async def pause_flow(self, flow_id: str) -> None:
-        async with self.lock:
+        async with self._exclusive_write():
             data = deepcopy(self.data)
             changed = False
             for record in data["records"].values():
@@ -260,7 +276,7 @@ class Vault:
                 await self._commit(data)
 
     async def purge(self) -> None:
-        async with self.lock:
+        async with self._exclusive_write():
 
             def delete() -> None:
                 location = Path(self.hass.config.config_dir) / DATA_FILE
@@ -294,7 +310,7 @@ class Vault:
                 except OSError:
                     pass
 
-            task = self.hass.async_add_executor_job(delete)
+            task = self.hass.loop.run_in_executor(None, delete)
             await self._finish_io(task, {"version": 2, "records": {}, "states": {}})
 
 

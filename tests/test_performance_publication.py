@@ -32,7 +32,14 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
-    async def check_activation_counts(self, config, runtime, count):
+    async def test_activation_after_publication_retry_still_batches_ready_devices(self):
+        config, runtime = await self.make_runtime(recovery=False)
+        try:
+            await self.check_activation_counts(config, runtime, 16, retry_publication=True)
+        finally:
+            await runtime.stop()
+
+    async def check_activation_counts(self, config, runtime, count, *, retry_publication=False):
         records = {}
         for index in range(count):
             target = make_owned(f"disposable-{index}", self.target["accessory_key"], {})
@@ -62,10 +69,19 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
         record_copies: list[int] = []
         snapshots = []
         write = vault_module._write
+        verify = runtime.verify_publication
+        checked = set()
 
         def record_checkpoint(config_dir, data):
             write(config_dir, data)
             snapshots.append({key: record["phase"] for key, record in data["records"].items()})
+
+        async def verify_checkpoint(target):
+            key = target["entry_id"]
+            if retry_publication and key not in checked:
+                checked.add(key)
+                raise OSError("sensor_entities_not_ready")
+            await verify(target)
 
         def count_record_copy(value):
             if isinstance(value, dict):
@@ -85,15 +101,15 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(vault_module, "deepcopy", side_effect=count_record_copy),
                 patch.object(vault_module, "_write", side_effect=record_checkpoint) as committed,
                 patch.object(vault_module.os, "fsync", wraps=vault_module.os.fsync) as fsync,
+                patch.object(runtime, "verify_publication", side_effect=verify_checkpoint),
             ):
                 snapshot = await runtime.update()
-                self.assertEqual(self.backend.read_ha.await_count, count)
+                self.assertEqual(self.backend.read_ha.await_count, count * (2 if retry_publication else 1))
                 self.assertEqual(record_copies, [1] * (3 * count))
                 self.assertEqual(committed.call_count, 3)
                 self.assertEqual(fsync.call_count, 6)
-                self.assertEqual(
-                    snapshots, [dict.fromkeys(records, phase) for phase in ("verified", "active", "active")]
-                )
+                phases = ("verified", "verified", "active") if retry_publication else ("verified", "active", "active")
+                self.assertEqual(snapshots, [dict.fromkeys(records, phase) for phase in phases])
             restored = await Vault(self.hass).load()
             self.assertEqual(set(snapshot), set(records))
             for key, record in restored.records().items():
