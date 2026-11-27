@@ -9,6 +9,11 @@ from tempfile import NamedTemporaryFile
 
 HAP_GROUP = "com.apple.hap.pairing"
 GROUP_VALUES = {"string": HAP_GROUP, "[]uint8": base64.b64encode(HAP_GROUP.encode("ascii")).decode("ascii")}
+BTLE_LABEL = "BTLE HomeKit Accessory Identifier"
+BTLE_LABELS = (
+    ("string", BTLE_LABEL),
+    ("[]uint8", base64.b64encode(BTLE_LABEL.encode("ascii")).decode("ascii")),
+)
 MAX_IMPORT_BYTES = 6 * 1024 * 1024  # Native irestore JSON limit in the Home Assistant form.
 
 
@@ -21,7 +26,7 @@ def unique_fields(pairs):
 
 
 def is_homekit_record(record):
-    """Identify the access group using irestore's declared field type."""
+    """Select live pairing records using irestore's declared field types."""
     group = record.get("agrp")
     if group not in GROUP_VALUES.values():
         return False
@@ -31,7 +36,13 @@ def is_homekit_record(record):
     names, kinds = order.split(","), types.split(",")
     if len(names) != len(kinds) or names.count("agrp") != 1:
         raise ValueError
-    return GROUP_VALUES.get(kinds[names.index("agrp")]) == group
+    fields = dict(zip(names, kinds))
+    if GROUP_VALUES.get(fields["agrp"]) != group:
+        return False
+    tomb = record.get("tomb")
+    if names.count("tomb") == 1 and fields["tomb"] == "int64" and type(tomb) is int and tomb == 1:
+        return False
+    return not any((fields.get(name), record.get(name)) in BTLE_LABELS for name in ("svce", "labl", "desc"))
 
 
 def main():
@@ -60,7 +71,7 @@ def main():
         return 1
 
     if not selected:
-        print("No HomeKit pairing group records were found in the irestore export.", file=sys.stderr)
+        print("No HomeKit pairing records were found in the irestore export.", file=sys.stderr)
         return 1
     if len(content) > MAX_IMPORT_BYTES:
         print("The HomeKit records still exceed 6 MiB. Select the records for the intended HomePods.", file=sys.stderr)

@@ -49,8 +49,8 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 export["description_placeholders"],
                 {
-                    "irestore_reduction_url": "https://github.com/barneyonline/ha-homepod-sensor-link/blob/main/"
-                    "SECURITY.md#reduce-an-oversized-irestore-export"
+                    "irestore_reduction_url": "https://github.com/barneyonline/ha-homepod-sensor-link/wiki/"
+                    "Credential-Extraction#import-selected-records-from-irestore"
                 },
             )
             self.assertIsNone(manual.get("description_placeholders"))

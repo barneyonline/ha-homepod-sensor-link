@@ -333,6 +333,13 @@ class IrestoreReductionTests(unittest.TestCase):
         script = Path(__file__).resolve().parents[1] / "scripts/reduce_irestore_export.py"
         return subprocess.run([sys.executable, script, source], capture_output=True, text=True, check=False)
 
+    def bluetooth_record(self):
+        row = record("bluetooth-metadata", bytes(16))
+        row["_fieldOrder"] += ",desc"
+        row["_fieldTypes"] += ",[]uint8"
+        row["desc"] = b64(b"BTLE HomeKit Accessory Identifier")
+        return row
+
     def test_reduces_oversized_dump_to_an_importable_private_copy(self):
         source_identity, accessory, _ = fixtures.export_fixture()
         data = dump(source_identity, accessory, byte_group=True)
@@ -342,6 +349,8 @@ class IrestoreReductionTests(unittest.TestCase):
         data["General"].append(record("unrelated-account", b"unrelated-key", group="other.group"))
         # This string resembles an encoded HomeKit group, but its declared type is string.
         data["General"].append(record("unrelated-lookalike", b"unrelated-key", group=b64(b"com.apple.hap.pairing")))
+        data["General"].append(record("deleted-account", b"disposable-deleted-data", tomb=1))
+        data["General"].append(self.bluetooth_record())
         raw = json.dumps(data).encode()
         with self.assertRaisesRegex(SafetyFailure, "credential_export_too_large"):
             parse_export(raw)
@@ -370,6 +379,8 @@ class IrestoreReductionTests(unittest.TestCase):
             ('{"General":["sensitive-synthetic-value"', "could not read"),
             ('{"General":[],"General":[]}', "could not read"),
             ('{"General":null}', "No HomeKit"),
+            (json.dumps({"General": [record("deleted-account", b"disposable-deleted-data", tomb=1)]}), "No HomeKit"),
+            (json.dumps({"General": [self.bluetooth_record()]}), "No HomeKit"),
             (json.dumps(large), "6 MiB"),
         ):
             with self.subTest(message=message), TemporaryDirectory() as directory:

@@ -15,13 +15,7 @@ Controller administrator identities can authorise pairing changes. HomePod Senso
 
 ## Reduce an oversized irestore export
 
-Keep `keychain.json` in the private local folder used for the irestore export. From a HomePod Sensor Link source checkout, run this command with Python 3 and replace the example path.
-
-```sh
-python3 scripts/reduce_irestore_export.py "/path/to/keychain.json"
-```
-
-On Windows, use `py -3` in place of `python3` and supply the Windows path. The script creates a compact `homepod-irestore-….json` alongside the source containing only records in the declared HomeKit pairing group. Open the new file locally and paste its contents into the Home Assistant credential form for key and identity validation. Keep both files private and dispose of export copies after setup. The same [selected-record import steps](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction#import-selected-records-from-irestore) are available for manual reduction.
+The local reducer selects records by their declared irestore access group and skips deleted and Bluetooth identifier records. It writes a new private JSON copy alongside the source, with owner-only permissions on POSIX. On Windows the new file uses the private folder's inherited permissions. Use the [credential extraction guide](https://github.com/barneyonline/ha-homepod-sensor-link/wiki/Credential-Extraction#import-selected-records-from-irestore) to prepare and clean up the reduced export. Home Assistant validates the imported key pairs and accessory pins.
 
 ## Direct macOS extraction
 
