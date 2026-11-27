@@ -12,7 +12,7 @@ Run the complete local gate before submitting changes:
 sh scripts/validate.sh
 ```
 
-The minimum and tested runtime is **HA 2026.11.0**, with **aiohomekit 4.0.1** and **Python 3.14**. Docker is required. Runtime tests mount source read-only and run with networking disabled. Reports are written outside the repository. Public tooling downloads during image construction are separate from test execution. Pinned versions live in `devtools/validation.json` and the two `devtools/requirements-*.txt` files.
+The runtime matrix tests the **HA 2026.11.0** minimum and the **HA 2026.12.0b2** beta, with **aiohomekit 4.0.1** and **Python 3.14**. Docker is required. Runtime tests mount source read-only and run with networking disabled. Reports are written outside the repository. Public tooling downloads during image construction are separate from test execution. Pinned versions live in `devtools/validation.json` and the two `devtools/requirements-*.txt` files.
 
 Focused commands:
 
@@ -67,7 +67,7 @@ Keep [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md), README links and 
 
 ## Automation
 
-CI uses read-only repository access for validation, package and coverage jobs. The isolated Codecov job receives `CODECOV_TOKEN` only after successful validation on trusted `main` and uploads the HA runtime’s Python coverage report. Pull-request validation does not receive that secret. Four metadata jobs use scoped issue/PR permissions and trusted-main code; manual dispatch only previews changes. The `pull_request_target` workflow never executes PR-head code.
+CI uses read-only repository access for validation, package and coverage jobs. The isolated Codecov job receives `CODECOV_TOKEN` only after successful validation on trusted `main` and uploads the Python coverage reports from the runtime matrix. Pull-request validation does not receive that secret. Four metadata jobs use scoped issue/PR permissions and trusted-main code; manual dispatch only previews changes. The `pull_request_target` workflow never executes PR-head code.
 
 The issue label workflow reconciles labels on open, reopen and edit. It uses the title prefix or the form’s field headings to choose `bug`, `enhancement`, `documentation` or `question`. The Area selection adds a topic label, and documentation feedback always gets `area/docs`. The workflow preserves `documentation` and `question` labels applied by maintainers.
 

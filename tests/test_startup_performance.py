@@ -16,6 +16,7 @@ from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.core import CoreState
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr, entity_registry as er, frame
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import EntityPlatform, async_get_platforms
 from homeassistant.helpers.start import async_at_started
 
@@ -934,14 +935,15 @@ class StartupPerformanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_expired_changed_missing_and_pending_preflight_samples_are_read_again(self):
         for reason in ("expired", "future", "identity_changed", "missing", "pending", "replaced", "no_preflight"):
             with self.subTest(reason=reason):
-                config, runtime = await self.make_runtime()
-                self.backend.read_ha.reset_mock()
+                # Keep provisioning and recovery from making unrelated reads.
+                config, runtime = await self.make_runtime(recovery=False, phase="active")
                 self.backend.read_ha.side_effect = None
                 self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
                 target = runtime.engine.targets[0]
                 try:
                     if reason != "no_preflight":
                         await runtime.preflight()
+                        self.assertIn(self.key, runtime._startup_samples)
                         before = runtime.readings[self.key][0]
                     else:
                         before = runtime_module.dt_util.utcnow()
@@ -957,22 +959,28 @@ class StartupPerformanceTests(unittest.IsolatedAsyncioTestCase):
                     elif reason == "pending":
                         runtime.engine.states[self.key].publication_pending = True
                     elif reason == "replaced":
-                        runtime.readings[self.key] = (
-                            before + timedelta(seconds=1),
-                            {"temperature": 22, "humidity": 46},
-                        )
-                    initial_reads = self.backend.read_ha.await_count
+                        now += timedelta(seconds=1)
+                        runtime.readings[self.key] = (now, {"temperature": 22, "humidity": 46})
+                    self.backend.read_ha.reset_mock()
+                    self.backend.read_ha.return_value = {"temperature": 23, "humidity": 47}
                     with (
                         patch.object(runtime_module.dt_util, "utcnow", return_value=now),
                         patch.object(runtime.engine, "verify_publication", AsyncMock()),
                     ):
                         await runtime.startup_refresh()
-                    self.assertGreater(self.backend.read_ha.await_count, initial_reads)
+                    self.assertTrue(runtime.coordinator.last_update_success)
+                    self.backend.read_ha.assert_awaited_once_with(target)
+                    self.assertEqual(runtime.readings.get(self.key), (now, {"temperature": 23, "humidity": 47}))
+                    expected_status = "publication_pending" if reason == "pending" else "healthy"
+                    self.assertEqual(runtime.engine.states[self.key].status, expected_status)
                     self.assertEqual(runtime._startup_samples, {})
                     self.assertFalse(runtime._use_startup_samples)
                     self.backend.restore_missing.assert_not_awaited()
                 finally:
                     await runtime.stop()
+                    ir.async_get(self.hass).async_clear_config_entry(config.entry_id)
+                    del self.hass.config_entries._entries[config.entry_id]
+                    await self.vault.remove(self.key)
 
     async def test_preflight_failure_is_not_reused_or_counted_twice_as_authentication_evidence(self):
         config, runtime = await self.make_runtime()
