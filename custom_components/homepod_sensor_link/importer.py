@@ -16,10 +16,11 @@ from .credentials import _public
 from .engine import SafetyFailure
 
 MAX_IMPORT = 131072
-# HA 2026.11.0 http/server.py permits 16 MiB requests; TextSelector has no
-# length cap. Leave room for the JSON envelope and worst-case 6x escaping.
+# HA 2026.11.0 permits 16 MiB HTTP requests. The browser JSON-encodes the
+# pasted text, which can double valid irestore JSON bytes. Leave room for
+# that escaping and the request envelope.
 # Only irestore dumps get this allowance; normalized formats retain MAX_IMPORT.
-MAX_RAW_IMPORT = 2 * 1024 * 1024
+MAX_RAW_IMPORT = 6 * 1024 * 1024
 CONTROLLER_FIELDS = {"iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK"}
 PAIRING_FIELDS = CONTROLLER_FIELDS | {"AccessoryPairingID", "AccessoryLTPK"}
 TRANSPORT_FIELDS = {"AccessoryIP", "AccessoryIPs", "AccessoryPort", "Connection"}

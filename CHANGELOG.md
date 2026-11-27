@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug fixes
 
-- None
+- Accept irestore keychain exports up to 6 MiB and provide a local tool to reduce larger exports to HomeKit pairing records before import.
 
 ### 🔧 Improvements
 

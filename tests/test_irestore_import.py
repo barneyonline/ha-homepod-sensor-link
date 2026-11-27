@@ -3,7 +3,12 @@
 import base64
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import stat
+import subprocess
+import sys
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -279,9 +284,10 @@ class IrestoreParserTests(unittest.TestCase):
 
     def test_actual_ha_text_and_request_limits_leave_room_for_json_escaping(self):
         selector = TextSelector(TextSelectorConfig(multiline=True, autocomplete="off"))
-        raw = "\x00" * MAX_RAW_IMPORT
+        document = '{"General":[]}'
+        raw = document + "\n" * (MAX_RAW_IMPORT - len(document))
         self.assertEqual(selector(raw), raw)
-        request = json.dumps({"credential_export": raw}).encode()
+        request = json.dumps({"credential_export": raw}, ensure_ascii=False).encode("utf-8")
         self.assertLess(len(request), MAX_CLIENT_SIZE)
         self.assertEqual(MAX_CLIENT_SIZE, 16 * 1024 * 1024)
 
@@ -322,6 +328,72 @@ class IrestoreParserTests(unittest.TestCase):
             self.assertEqual(parse_export(csv), expected)
 
 
+class IrestoreReductionTests(unittest.TestCase):
+    def run_reducer(self, source):
+        script = Path(__file__).resolve().parents[1] / "scripts/reduce_irestore_export.py"
+        return subprocess.run([sys.executable, script, source], capture_output=True, text=True, check=False)
+
+    def bluetooth_record(self):
+        row = record("bluetooth-metadata", bytes(16))
+        row["_fieldOrder"] += ",desc"
+        row["_fieldTypes"] += ",[]uint8"
+        row["desc"] = b64(b"BTLE HomeKit Accessory Identifier")
+        return row
+
+    def test_reduces_oversized_dump_to_an_importable_private_copy(self):
+        source_identity, accessory, _ = fixtures.export_fixture()
+        data = dump(source_identity, accessory, byte_group=True)
+        data["General"][0] = dump(source_identity, accessory)["General"][0]
+        expected = parse_export(json.dumps(data))
+        data["Internet"] = [{"v_Data": "unrelated-synthetic-password" + "x" * MAX_RAW_IMPORT}]
+        data["General"].append(record("unrelated-account", b"unrelated-key", group="other.group"))
+        # This string resembles an encoded HomeKit group, but its declared type is string.
+        data["General"].append(record("unrelated-lookalike", b"unrelated-key", group=b64(b"com.apple.hap.pairing")))
+        data["General"].append(record("deleted-account", b"disposable-deleted-data", tomb=1))
+        data["General"].append(self.bluetooth_record())
+        raw = json.dumps(data).encode()
+        with self.assertRaisesRegex(SafetyFailure, "credential_export_too_large"):
+            parse_export(raw)
+
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "keychain.json"
+            source.write_bytes(raw)
+            result = self.run_reducer(source)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (output,) = source.parent.glob("homepod-irestore-*.json")
+            self.assertIn(output.name, result.stdout)
+            self.assertEqual(source.read_bytes(), raw)
+            self.assertEqual(parse_export(output.read_bytes()), expected)
+            self.assertEqual(json.loads(output.read_bytes()), {"General": data["General"][:2]})
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+            self.assertNotIn("unrelated-synthetic-password", result.stdout + result.stderr)
+            again = self.run_reducer(source)
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertEqual(len(list(source.parent.glob("homepod-irestore-*.json"))), 2)
+
+    def test_invalid_empty_and_still_oversized_exports_never_create_output(self):
+        large = dump()
+        large["General"][0]["_wkey"] = "x" * MAX_RAW_IMPORT
+        for raw, message in (
+            ('{"General":["sensitive-synthetic-value"', "could not read"),
+            ('{"General":[],"General":[]}', "could not read"),
+            ('{"General":null}', "No HomeKit"),
+            (json.dumps({"General": [record("deleted-account", b"disposable-deleted-data", tomb=1)]}), "No HomeKit"),
+            (json.dumps({"General": [self.bluetooth_record()]}), "No HomeKit"),
+            (json.dumps({"General": dump()["General"][1:]}), "no HomeKit controller identity"),
+            (json.dumps(large), "6 MiB"),
+        ):
+            with self.subTest(message=message), TemporaryDirectory() as directory:
+                source = Path(directory) / "keychain.json"
+                source.write_text(raw, encoding="utf-8")
+                result = self.run_reducer(source)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn("sensitive-synthetic-value", result.stdout + result.stderr)
+                self.assertEqual(list(source.parent.iterdir()), [source])
+
+
 class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
@@ -350,7 +422,9 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_large_dump_uses_existing_form_and_retains_only_normalized_hap_state(self):
         manager = self.hass.config_entries.flow
         data = dump(self.source, self.accessory, byte_account=True, byte_group=True)
-        data["Internet"] = "UNRELATED-PRIVATE-PASSWORD" * 10000
+        data["Internet"] = [{"v_Data": "UNRELATED-PRIVATE-PASSWORD" + "x" * (3 * 1024 * 1024)}]
+        content = json.dumps(data)
+        self.assertGreater(len(content.encode("utf-8")), 2 * 1024 * 1024)
         async with self.flow_environment():
             with patch(
                 "homeassistant.config_entries._async_get_flow_handler",
@@ -373,8 +447,9 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(
                 flow, "_begin", AsyncMock(return_value=flow.async_show_menu(step_id="credentials", menu_options=[]))
             ):
-                result = await manager.async_configure(flow_id, {"credential_export": json.dumps(data)})
-            self.assertEqual(flow._imported, parse_export(json.dumps(data)))
+                result = await manager.async_configure(flow_id, {"credential_export": content})
+            self.assertEqual(result["type"], FlowResultType.MENU)
+            self.assertEqual(flow._imported, parse_export(json.dumps({"General": data["General"]})))
             self.assertNotIn("UNRELATED-PRIVATE-PASSWORD", str(vars(flow)))
             self.assertNotIn("_fieldOrder", str(vars(flow)))
             self.assertNotIn(self.source["iOSDeviceLTSK"], str(result))
