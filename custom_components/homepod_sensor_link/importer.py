@@ -6,6 +6,7 @@ from .models import Data
 
 
 import base64
+from collections.abc import Collection
 import csv
 import io
 import json
@@ -21,14 +22,15 @@ MAX_IMPORT = 131072
 # that escaping and the request envelope.
 # Only irestore dumps get this allowance; normalized formats retain MAX_IMPORT.
 MAX_RAW_IMPORT = 6 * 1024 * 1024
+_MAX_PAIRING_RECORDS = 64
 CONTROLLER_FIELDS = {"iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK"}
 PAIRING_FIELDS = CONTROLLER_FIELDS | {"AccessoryPairingID", "AccessoryLTPK"}
 TRANSPORT_FIELDS = {"AccessoryIP", "AccessoryIPs", "AccessoryPort", "Connection"}
 _BTLE_LABEL = "BTLE HomeKit Accessory Identifier"
-_IRESTORE_BTLE_LABELS = (
-    ("string", _BTLE_LABEL),
-    ("[]uint8", base64.b64encode(_BTLE_LABEL.encode("ascii")).decode("ascii")),
-)
+_IRESTORE_BTLE_LABEL = _BTLE_LABEL.encode("ascii")
+_IRESTORE_ACCESSORY_LABEL = b"Paired HomeKit Accessory"
+_IRESTORE_TEXT_CONTROLLER = re.compile(rb"[0-9a-fA-F]{64}\+[0-9a-fA-F]{64}")
+_IRESTORE_TEXT_ACCESSORY = re.compile(rb"[0-9a-fA-F]{64}")
 _CSV_BINARY_PLACEHOLDER = re.compile(r"[0-9]+ bytes \(binary\)")
 type _ExportErrorCode = Literal[
     "invalid_credential_export",
@@ -36,6 +38,9 @@ type _ExportErrorCode = Literal[
     "credential_export_binary_placeholder",
     "irestore_no_controller",
     "irestore_invalid_records",
+    "irestore_unsupported_key_format",
+    "irestore_controller_key_mismatch",
+    "irestore_conflicting_records",
 ]
 
 
@@ -45,6 +50,14 @@ class CredentialExportError(SafetyFailure):
     def __init__(self, code: _ExportErrorCode) -> None:
         super().__init__(code)
         self.code = code
+
+
+class _ControllerKeyMismatch(ValueError):
+    """A controller's public key does not match its private key."""
+
+
+class _ConflictingPairingRecords(ValueError):
+    """Records for the same identity disagree."""
 
 
 def discovery_hosts(record: Data) -> list[str]:
@@ -95,7 +108,7 @@ def _irestore_fields(record: Data) -> dict[str, str]:
 
 
 def _irestore_bytes(record: Data, fields: dict[str, str], name: str) -> bytes:
-    """Decode exactly the declared Go type, never infer an encoding from text."""
+    """Decode the outer encoding using the declared Go type."""
     value = record[name]
     if not isinstance(value, str):
         raise ValueError
@@ -106,7 +119,18 @@ def _irestore_bytes(record: Data, fields: dict[str, str], name: str) -> bytes:
     raise ValueError
 
 
-def _irestore_records(data: Data) -> tuple[list[Data], list[Data]]:
+def _irestore_labels(record: Data, fields: dict[str, str]) -> set[bytes]:
+    labels = set()
+    for name in fields.keys() & {"svce", "labl", "desc"}:
+        try:
+            labels.add(_irestore_bytes(record, fields, name))
+        except ValueError:
+            # Optional labels with an unsupported representation cannot identify a record.
+            continue
+    return labels
+
+
+def _irestore_records(data: Data) -> tuple[list[Data], list[Data], set[int]]:
     """Discard other categories/groups before reading any account or key data."""
     records = data["General"]
     if records is None:
@@ -116,6 +140,7 @@ def _irestore_records(data: Data) -> tuple[list[Data], list[Data]]:
         raise ValueError
     controllers: list[Data] = []
     accessories: list[Data] = []
+    accessory_labeled_controllers: set[int] = set()
     for record in records:
         if not isinstance(record, dict):
             raise ValueError
@@ -132,22 +157,34 @@ def _irestore_records(data: Data) -> tuple[list[Data], list[Data]]:
                 raise ValueError
             if record["tomb"] == 1:
                 continue
-        if any((fields.get(name), record.get(name)) in _IRESTORE_BTLE_LABELS for name in ("svce", "labl", "desc")):
+        labels = _irestore_labels(record, fields)
+        label_names = {label.partition(b":")[0] for label in labels}
+        if _IRESTORE_BTLE_LABEL in label_names:
             # A BLE identifier is metadata, even if its length matches a key.
             continue
         identifier = _irestore_bytes(record, fields, "acct").decode("utf-8")
         value = _irestore_bytes(record, fields, "v_Data")
+        raw_with_accessory_label = len(value) == 64 and _IRESTORE_ACCESSORY_LABEL in label_names
+        if _IRESTORE_TEXT_CONTROLLER.fullmatch(value):
+            # The separator identifies a text controller key pair independently of optional labels.
+            value = bytes.fromhex(value.replace(b"+", b"").decode("ascii"))
+        elif raw_with_accessory_label and _IRESTORE_TEXT_ACCESSORY.fullmatch(value):
+            # Only an accessory label disambiguates a 64-character text pin from a raw controller.
+            value = bytes.fromhex(value.decode("ascii"))
         if len(value) == 64:
+            if raw_with_accessory_label:
+                # Defer legacy raw key proof until after the record counts have been checked.
+                accessory_labeled_controllers.add(len(controllers))
             controllers.append(
                 {"iOSPairingId": identifier, "iOSDeviceLTPK": value[:32].hex(), "iOSDeviceLTSK": value[32:].hex()}
             )
         elif len(value) == 32:
             accessories.append({"AccessoryPairingID": identifier, "AccessoryLTPK": value.hex()})
         else:
-            raise ValueError
+            raise CredentialExportError("irestore_unsupported_key_format")
     if not controllers:
         raise CredentialExportError("irestore_no_controller")
-    return controllers, accessories
+    return controllers, accessories, accessory_labeled_controllers
 
 
 def parse_export(content: bytes | str) -> Data:
@@ -190,6 +227,10 @@ def _parse_export(content: bytes | str) -> Data:
         if "General" in data:
             try:
                 return _normalize_credentials(*_irestore_records(data))
+            except _ControllerKeyMismatch:
+                raise CredentialExportError("irestore_controller_key_mismatch") from None
+            except _ConflictingPairingRecords:
+                raise CredentialExportError("irestore_conflicting_records") from None
             except (KeyError, TypeError, ValueError):
                 raise CredentialExportError("irestore_invalid_records") from None
         if size > MAX_IMPORT:
@@ -255,29 +296,33 @@ def _parse_export(content: bytes | str) -> Data:
     return result
 
 
-def _normalize_credentials(controllers: list[Data], accessories: list[Data]) -> Data:
+def _normalize_credentials(
+    controllers: list[Data], accessories: list[Data], accessory_labeled_controllers: Collection[int] = ()
+) -> Data:
     """Validate pairing records shared by all export formats."""
     if (
         not isinstance(controllers, list)
         or not isinstance(accessories, list)
-        or not 1 <= len(controllers) <= 64
-        or len(accessories) > 64
+        or not 1 <= len(controllers) <= _MAX_PAIRING_RECORDS
+        or len(accessories) > _MAX_PAIRING_RECORDS
     ):
         raise ValueError
     identities: dict[str, Data] = {}
     pins: dict[str, str] = {}
     raw_ids: dict[str, str] = {}
-    for source in controllers:
+    for index, source in enumerate(controllers):
         if set(source) - {"iOSPairingId", "iOSDeviceLTSK", "iOSDeviceLTPK"}:
             raise ValueError
         identifier = _identifier(source["iOSPairingId"])
         secret = _hex(source["iOSDeviceLTSK"], 64)
         public = _public(secret)
         if "iOSDeviceLTPK" in source and _hex(source["iOSDeviceLTPK"], 64) != public:
-            raise ValueError
+            if index in accessory_labeled_controllers:
+                raise CredentialExportError("irestore_unsupported_key_format")
+            raise _ControllerKeyMismatch
         value = {"iOSPairingId": identifier, "iOSDeviceLTSK": secret, "iOSDeviceLTPK": public}
         if identifier in identities and identities[identifier] != value:
-            raise ValueError
+            raise _ConflictingPairingRecords
         identities[identifier] = value
     for accessory in accessories:
         if set(accessory) != {"AccessoryPairingID", "AccessoryLTPK"}:
@@ -286,7 +331,7 @@ def _normalize_credentials(controllers: list[Data], accessories: list[Data]) -> 
         identifier = raw.lower()
         public = _hex(accessory["AccessoryLTPK"], 64)
         if identifier in pins and (pins[identifier] != public or raw_ids[identifier] != raw):
-            raise ValueError
+            raise _ConflictingPairingRecords
         pins[identifier] = public
         raw_ids[identifier] = raw
     return {"controllers": list(identities.values()), "accessories": pins, "accessory_identifiers": raw_ids}

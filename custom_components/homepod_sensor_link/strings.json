@@ -50,7 +50,7 @@
       },
       "credential_export": {
         "title": "Paste credential export",
-        "description": "Open your selected HAP CSV/JSON export (maximum 128 KiB), or an irestore v0.4.0 keychain.json export (maximum 6 MiB), in a text editor and paste its contents below. From irestore dumps, only non-deleted com.apple.hap.pairing records in General are imported; other credentials are discarded. The text is visible while you edit it. Raw exports stay in memory and are not saved as uploaded files. Address hints in pairing JSON trigger fresh discovery; review the discovered devices before continuing setup.\n\nFor a larger irestore file, [reduce the export locally]({irestore_reduction_url}) before pasting.",
+        "description": "Open your selected HAP CSV/JSON export (maximum 128 KiB), or an irestore v0.4.0 JSON export (maximum 6 MiB), in a text editor and paste its contents below. From irestore dumps, only non-deleted com.apple.hap.pairing records in General are imported; other credentials are discarded. The text is visible while you edit it. Raw exports stay in memory and are not saved as uploaded files. Address hints in pairing JSON trigger fresh discovery; review the discovered devices before continuing setup.\n\nFor irestore, [reduce the export locally]({irestore_reduction_url}) before pasting to keep unrelated keychain items out of the clipboard and this form.",
         "data": {
           "credential_export": "CSV or JSON export"
         }
@@ -142,10 +142,13 @@
       "device_action_failed": "The device action did not complete. Local state was kept or cleanup remains pending. Check protected storage and connectivity before retrying.",
       "credential_export_binary_placeholder": "The CSV contains byte counts in place of HomeKit keys. Export keychain.json from the encrypted backup with irestore v0.4.0, then paste that JSON.",
       "credential_export_too_large": "The pasted export exceeds the size limit (6 MiB for irestore JSON, 128 KiB for other exports, measured as UTF-8). For irestore, follow the local reduction instructions above and paste the smaller JSON file. If you have the individual key values, use Enter controller credentials.",
-      "irestore_no_controller": "The irestore export contains no HomeKit controller identity. Try a fresh encrypted backup of an iPhone or iPad with administrator access to the intended Apple Home.",
+      "irestore_no_controller": "The irestore export contains no HomeKit controller identity. Try a fresh encrypted backup of an iPhone or iPad with administrator access to the intended Apple Home. (irestore_no_controller)",
       "invalid_credential_export": "The export could not be read. Paste the complete CSV or JSON from a local text editor and include valid HomeKit pairing records.",
       "invalid_manual_credentials": "Check the controller identifier and its 64-character hexadecimal private key. Enter both accessory fields together if needed.",
-      "irestore_invalid_records": "The irestore JSON was read, but its HomeKit pairing records are incomplete, invalid or conflicting. Try importing selected complete pairing records or export the encrypted backup again.",
+      "irestore_invalid_records": "Some HomeKit pairing records are incomplete or invalid, or there are too many records. Try a reduced copy with complete records for the intended HomePods. (irestore_invalid_records)",
+      "irestore_unsupported_key_format": "A HomeKit pairing key has an unsupported format or length. Create a fresh encrypted backup, then export keychain.json with irestore v0.4.0. If the error persists, report this code. (irestore_unsupported_key_format)",
+      "irestore_controller_key_mismatch": "A HomeKit controller’s public and private keys do not match. Use an unedited export from a fresh encrypted backup of an Apple Home administrator’s device. (irestore_controller_key_mismatch)",
+      "irestore_conflicting_records": "The export has conflicting records for the same controller or accessory. Try a fresh encrypted backup or select only the complete records you can identify for the intended HomePods. (irestore_conflicting_records)",
       "accessory_pin_required": "The last import had no matching accessory record for this HomePod. Include its paired accessory record when you resume setup.",
       "confirm_removal": "Confirm that you want to delete this HomePod’s local credentials and recovery history.",
       "confirm_transition": "Confirm that you want separate sensor connections. Native HomeKit entries will not be adopted or changed."
