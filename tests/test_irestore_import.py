@@ -18,7 +18,7 @@ from homeassistant.components.http.server import MAX_CLIENT_SIZE
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.selector import TextSelector, TextSelectorConfig
 
-from custom_components.homepod_sensor_link import config_flow
+from custom_components.homepod_sensor_link import config_flow, importer
 from custom_components.homepod_sensor_link.diagnostics import async_get_config_entry_diagnostics
 from custom_components.homepod_sensor_link.engine import SafetyFailure
 from custom_components.homepod_sensor_link.importer import MAX_IMPORT, MAX_RAW_IMPORT, parse_export
@@ -64,6 +64,38 @@ def dump(source=None, accessory=None, **encoding):
         "Internet": None,
         "Certs": [],
         "Keys": [],
+    }
+
+
+def labeled_record(identifier, value, label, *, field="svce", byte_label=True):
+    row = record(identifier, value)
+    row["_fieldOrder"] += f",{field}"
+    row["_fieldTypes"] += ",[]uint8" if byte_label else ",string"
+    row[field] = b64(label.encode()) if byte_label else label
+    return row
+
+
+def text_dump(source, accessory, *, byte_label=True):
+    controller = f"{source['iOSDeviceLTPK']}+{source['iOSDeviceLTSK']}".encode()
+    return {
+        "General": [
+            labeled_record(
+                source["iOSPairingId"], controller, "HomeKit Pairing Identity Backup", byte_label=byte_label
+            ),
+            labeled_record(
+                accessory["accessory_id"],
+                accessory["accessory_key"].upper().encode(),
+                "Paired HomeKit Accessory: disposable",
+                field="labl",
+                byte_label=byte_label,
+            ),
+            labeled_record(
+                "bluetooth-metadata",
+                bytes(16),
+                "BTLE HomeKit Accessory Identifier: disposable",
+                byte_label=byte_label,
+            ),
+        ],
     }
 
 
@@ -114,7 +146,7 @@ class IrestoreParserTests(unittest.TestCase):
         self.assertEqual(next(iter(result["accessories"].values())), b"a".hex() * 32)
         data["General"][1]["v_Data"] = "ab" * 32
         # A 64-character string is 64 bytes, not a 32-byte hexadecimal key.
-        self.reject(data)
+        self.reject(data, "irestore_controller_key_mismatch")
 
     def test_unrelated_categories_groups_and_deleted_records_are_discarded(self):
         data = dump()
@@ -171,6 +203,54 @@ class IrestoreParserTests(unittest.TestCase):
                 data["General"].append(row)
         self.assertEqual(parse_export(json.dumps(data)), expected)
 
+    def test_native_text_keys_and_suffixed_bluetooth_metadata(self):
+        source, accessory, _ = fixtures.export_fixture()
+        expected = parse_export(json.dumps(dump(source, accessory)))
+        for byte_label in (True, False):
+            data = text_dump(source, accessory, byte_label=byte_label)
+            self.assertEqual(parse_export(json.dumps(data)), expected)
+            bluetooth = data["General"][2]
+            bluetooth["v_Data"] = b64(bytes(32))
+            self.assertEqual(parse_export(json.dumps(data)), expected)
+            # The keys can also be stored as raw bytes with these labels.
+            for row, raw in zip(data["General"][:2], dump(source, accessory)["General"], strict=True):
+                row["v_Data"] = raw["v_Data"]
+            self.assertEqual(parse_export(json.dumps(data)), expected)
+        raw_identity = bytes.fromhex(source["iOSDeviceLTPK"] + source["iOSDeviceLTSK"])
+        data = dump(source, accessory)
+        row = labeled_record(source["iOSPairingId"], raw_identity, "unused metadata", field="desc")
+        row["desc"] = "!invalid!"
+        data["General"][0] = row
+        self.assertEqual(parse_export(json.dumps(data)), expected)
+
+    def test_mislabeled_raw_controller_proofs_are_unique_and_follow_record_limit(self):
+        source, _, _ = fixtures.export_fixture()
+        raw = bytes.fromhex(source["iOSDeviceLTPK"] + source["iOSDeviceLTSK"])
+        controller = labeled_record(source["iOSPairingId"], raw, "Paired HomeKit Accessory: disposable")
+        with patch.object(importer, "_public", wraps=importer._public) as derive_public:
+            self.assertEqual(parse_export(json.dumps({"General": [controller]}))["controllers"], [source])
+            derive_public.assert_called_once()
+            derive_public.reset_mock()
+            self.reject({"General": [controller] * 1000})
+            derive_public.assert_not_called()
+
+    def test_labeled_text_keys_still_reject_bad_keys_and_conflicting_pins(self):
+        source, accessory, _ = fixtures.export_fixture()
+        for index, value, reason in (
+            (0, f"{source['iOSDeviceLTSK']}+{source['iOSDeviceLTPK']}".encode(), "irestore_controller_key_mismatch"),
+            (0, b"g" * 64 + b"+" + b"0" * 64, "irestore_unsupported_key_format"),
+            (1, b"g" * 64, "irestore_unsupported_key_format"),
+            (1, b"0" * 63 + b" ", "irestore_unsupported_key_format"),
+        ):
+            data = text_dump(source, accessory)
+            data["General"][index]["v_Data"] = b64(value)
+            self.reject(data, reason)
+        data = text_dump(source, accessory)
+        conflicting = deepcopy(data["General"][1])
+        conflicting["v_Data"] = b64((bytes(32).hex()).encode())
+        data["General"].append(conflicting)
+        self.reject(data, "irestore_conflicting_records")
+
     def test_malformed_metadata_and_wrong_field_types_fail_closed(self):
         modifications = [
             {"_fieldOrder": None},
@@ -218,13 +298,13 @@ class IrestoreParserTests(unittest.TestCase):
         for length in (0, 1, 31, 33, 63, 65, 96):
             data = dump()
             data["General"][1]["v_Data"] = b64(bytes(length))
-            self.reject(data)
+            self.reject(data, "irestore_unsupported_key_format")
         data = dump()
         data["General"][0]["v_Data"] = b64(bytes(64))
-        self.reject(data)
+        self.reject(data, "irestore_controller_key_mismatch")
         data = dump()
         data["General"][0]["v_Data"] = b64(base64.b64decode(data["General"][0]["v_Data"])[::-1])
-        self.reject(data)
+        self.reject(data, "irestore_controller_key_mismatch")
         self.reject('{"General": [], "General": []}', "invalid_credential_export")
         self.reject('{"General": ["unrelated-private-secret"', "invalid_credential_export")
         self.reject('{"General":' + "[" * 2000, "invalid_credential_export")
@@ -239,13 +319,13 @@ class IrestoreParserTests(unittest.TestCase):
         different_source, _, _ = fixtures.export_fixture()
         data["General"].append(dump(different_source)["General"][0])
         data["General"][-1]["acct"] = original["General"][0]["acct"]
-        self.reject(data)
+        self.reject(data, "irestore_conflicting_records")
         for update in ({"v_Data": b64(b"a" * 32)}, {"acct": original["General"][1]["acct"].lower()}):
             data = deepcopy(original)
             extra = deepcopy(data["General"][1])
             extra.update(update)
             data["General"].append(extra)
-            self.reject(data)
+            self.reject(data, "irestore_conflicting_records")
 
     def test_raw_utf8_boundaries_and_existing_normalized_limits(self):
         data = dump()
@@ -393,6 +473,77 @@ class IrestoreReductionTests(unittest.TestCase):
                 self.assertNotIn("sensitive-synthetic-value", result.stdout + result.stderr)
                 self.assertEqual(list(source.parent.iterdir()), [source])
 
+    def test_reducer_keeps_text_keys_but_ignores_suffixed_bluetooth_metadata(self):
+        identity, accessory, _ = fixtures.export_fixture()
+        data = text_dump(identity, accessory)
+        paired = data["General"][1]
+        paired["_fieldOrder"] += ",desc"
+        paired["_fieldTypes"] += ",string"
+        paired["desc"] = "HomeKit Pairing Identity"
+        expected = parse_export(json.dumps(dump(identity, accessory)))
+        self.assertEqual(parse_export(json.dumps(data)), expected)
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "keychain.json"
+            source.write_text(json.dumps({"General": data["General"][1:]}), encoding="utf-8")
+            result = self.run_reducer(source)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no HomeKit controller identity", result.stderr)
+            self.assertEqual(list(source.parent.iterdir()), [source])
+            source.write_text(json.dumps(data), encoding="utf-8")
+            result = self.run_reducer(source)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (output,) = source.parent.glob("homepod-irestore-*.json")
+            self.assertEqual(json.loads(output.read_bytes()), {"General": data["General"][:2]})
+            self.assertEqual(parse_export(output.read_bytes()), expected)
+
+    def test_reducer_rejects_malformed_metadata_before_skipping_suffixed_bluetooth_row(self):
+        identity, accessory, _ = fixtures.export_fixture()
+        for change in (
+            {"tomb": True},
+            {"unexpected_field": "disposable"},
+            {"_fieldTypes": "[]uint8,int64,string,[]uint8,[]uint8"},
+            {"_fieldTypes": "[]uint8,int64,string,int64,[]uint8"},
+        ):
+            with TemporaryDirectory() as directory:
+                data = text_dump(identity, accessory)
+                data["General"][2].update(change)
+                content = json.dumps(data).encode()
+                with self.assertRaisesRegex(SafetyFailure, "^irestore_invalid_records$"):
+                    parse_export(content)
+                source = Path(directory) / "keychain.json"
+                source.write_bytes(content)
+                result = self.run_reducer(source)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("could not read", result.stderr)
+                self.assertEqual(list(source.parent.iterdir()), [source])
+
+    def test_reducer_matches_direct_import_with_missing_or_inconsistent_pairing_labels(self):
+        identity, accessory, _ = fixtures.export_fixture()
+        expected = parse_export(json.dumps(dump(identity, accessory)))
+        raw_controller = bytes.fromhex(identity["iOSDeviceLTPK"] + identity["iOSDeviceLTSK"])
+        text_controller = f"{identity['iOSDeviceLTPK']}+{identity['iOSDeviceLTSK']}".encode()
+        raw_accessory = bytes.fromhex(accessory["accessory_key"])
+        conflicting = labeled_record(identity["iOSPairingId"], text_controller, "HomeKit Pairing Identity")
+        conflicting["_fieldOrder"] += ",desc"
+        conflicting["_fieldTypes"] += ",string"
+        conflicting["desc"] = "Paired HomeKit Accessory: disposable"
+        for controller in (
+            record(identity["iOSPairingId"], text_controller),
+            conflicting,
+            labeled_record(identity["iOSPairingId"], text_controller, "\ud800", field="desc", byte_label=False),
+            labeled_record(identity["iOSPairingId"], raw_controller, "Paired HomeKit Accessory: disposable"),
+        ):
+            paired = labeled_record(accessory["accessory_id"], raw_accessory, "HomeKit Pairing Identity")
+            content = json.dumps({"General": [controller, paired]}).encode()
+            self.assertEqual(parse_export(content), expected)
+            with TemporaryDirectory() as directory:
+                source = Path(directory) / "keychain.json"
+                source.write_bytes(content)
+                result = self.run_reducer(source)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                (reduced,) = source.parent.glob("homepod-irestore-*.json")
+                self.assertEqual(parse_export(reduced.read_bytes()), expected)
+
 
 class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
@@ -402,10 +553,19 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
     flow = flow_fixtures.FlowLifecycleTests.flow
 
     async def test_specific_export_errors_keep_the_form_empty(self):
+        unsupported = text_dump(self.source, self.accessory)
+        unsupported["General"][0]["v_Data"] = b64(b"unsupported key")
+        mismatched = text_dump(self.source, self.accessory)
+        mismatched["General"][0]["v_Data"] = b64(bytes(64))
+        conflicting = text_dump(self.source, self.accessory)
+        conflicting["General"].append(record(self.accessory["accessory_id"], bytes(32)))
         async with self.flow_environment():
             flow = self.flow()
             for raw, reason in (
                 (json.dumps({"General": []}), "irestore_no_controller"),
+                (json.dumps(unsupported), "irestore_unsupported_key_format"),
+                (json.dumps(mismatched), "irestore_controller_key_mismatch"),
+                (json.dumps(conflicting), "irestore_conflicting_records"),
                 ("é" * (MAX_RAW_IMPORT // 2 + 1), "credential_export_too_large"),
                 (
                     "Account,Password,App / Group\ndisposable,16 bytes (binary),com.apple.hap.pairing\n",
@@ -418,10 +578,12 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(payload, {})
                 self.assertIsNone(flow._imported)
                 self.assertNotIn("default", str(result["data_schema"].schema))
+                self.assertNotIn(self.source["iOSDeviceLTSK"], str(result))
 
-    async def test_large_dump_uses_existing_form_and_retains_only_normalized_hap_state(self):
+    async def test_large_text_encoded_dump_uses_form_and_retains_only_normalized_hap_state(self):
         manager = self.hass.config_entries.flow
-        data = dump(self.source, self.accessory, byte_account=True, byte_group=True)
+        data = text_dump(self.source, self.accessory)
+        expected = parse_export(json.dumps(dump(self.source, self.accessory, byte_account=True, byte_group=True)))
         data["Internet"] = [{"v_Data": "UNRELATED-PRIVATE-PASSWORD" + "x" * (3 * 1024 * 1024)}]
         content = json.dumps(data)
         self.assertGreater(len(content.encode("utf-8")), 2 * 1024 * 1024)
@@ -449,7 +611,7 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
             ):
                 result = await manager.async_configure(flow_id, {"credential_export": content})
             self.assertEqual(result["type"], FlowResultType.MENU)
-            self.assertEqual(flow._imported, parse_export(json.dumps({"General": data["General"]})))
+            self.assertEqual(flow._imported, expected)
             self.assertNotIn("UNRELATED-PRIVATE-PASSWORD", str(vars(flow)))
             self.assertNotIn("_fieldOrder", str(vars(flow)))
             self.assertNotIn(self.source["iOSDeviceLTSK"], str(result))
@@ -459,7 +621,7 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_selected_device_only_persists_validated_source_and_user_identity(self):
         flow = self.flow()
-        data = dump(self.source, self.accessory)
+        data = text_dump(self.source, self.accessory)
         data["General"].insert(0, {"_fieldOrder": "", "_fieldTypes": "", "_class": 6, "_version": 3})
         data["General"].append(record("unselected-accessory", b"a" * 32))
         data["General"].append(record("unrelated-account", b"UNRELATED-PRIVATE-PASSWORD", group="other.group"))

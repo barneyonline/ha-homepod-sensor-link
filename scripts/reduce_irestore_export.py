@@ -4,16 +4,16 @@ import argparse
 import base64
 import json
 from pathlib import Path
+import re
 import sys
 from tempfile import NamedTemporaryFile
 
 HAP_GROUP = "com.apple.hap.pairing"
 GROUP_VALUES = {"string": HAP_GROUP, "[]uint8": base64.b64encode(HAP_GROUP.encode("ascii")).decode("ascii")}
-BTLE_LABEL = "BTLE HomeKit Accessory Identifier"
-BTLE_LABELS = (
-    ("string", BTLE_LABEL),
-    ("[]uint8", base64.b64encode(BTLE_LABEL.encode("ascii")).decode("ascii")),
-)
+BTLE_LABEL = b"BTLE HomeKit Accessory Identifier"
+ACCESSORY_LABEL = b"Paired HomeKit Accessory"
+TEXT_CONTROLLER = re.compile(rb"[0-9a-fA-F]{64}\+[0-9a-fA-F]{64}")
+TEXT_ACCESSORY = re.compile(rb"[0-9a-fA-F]{64}")
 MAX_IMPORT_BYTES = 6 * 1024 * 1024  # Native irestore JSON limit in the Home Assistant form.
 
 
@@ -34,34 +34,52 @@ def pairing_fields(record):
     if not isinstance(order, str) or not isinstance(types, str):
         raise ValueError
     names, kinds = order.split(","), types.split(",")
-    if len(names) != len(kinds) or names.count("agrp") != 1:
+    if (
+        len(names) != len(kinds)
+        or len(set(names)) != len(names)
+        or any(not name or name.startswith("_") for name in names)
+        or any(not kind for kind in kinds)
+        or set(names) != {name for name in record if not name.startswith("_")}
+    ):
         raise ValueError
     fields = dict(zip(names, kinds))
-    if GROUP_VALUES.get(fields["agrp"]) != group:
+    group_kind = fields["agrp"]
+    if group_kind == "[]uint8":
+        group = base64.b64decode(group, validate=True).decode("ascii")
+    elif group_kind != "string":
+        raise ValueError
+    if group != HAP_GROUP:
         return None
-    tomb = record.get("tomb")
-    if names.count("tomb") == 1 and fields["tomb"] == "int64" and type(tomb) is int and tomb == 1:
-        return None
-    if any((fields.get(name), record.get(name)) in BTLE_LABELS for name in ("svce", "labl", "desc")):
-        return None
+    if "tomb" in fields:
+        tomb = record["tomb"]
+        if fields["tomb"] != "int64" or type(tomb) is not int or tomb not in (0, 1):
+            raise ValueError
+        if tomb == 1:
+            return None
     return fields
 
 
-def has_controller_value(record, fields):
-    """Recognise a 64-byte controller record before Home Assistant validates its keys."""
-    value = record.get("v_Data")
+def declared_bytes(record, fields, name):
+    value = record.get(name)
     if not isinstance(value, str):
-        return False
-    kind = fields.get("v_Data")
-    if kind == "string":
-        return len(value) <= 64 and len(value.encode("utf-8")) == 64
-    # irestore's Base64 encoding of a 64-byte value occupies 88 characters.
-    if kind != "[]uint8" or len(value) != 88:
-        return False
+        return b""
+    kind = fields.get(name)
     try:
-        return len(base64.b64decode(value, validate=True)) == 64
+        if kind == "string":
+            return value.encode("utf-8")
+        if kind == "[]uint8":
+            return base64.b64decode(value, validate=True)
     except ValueError:
-        return False
+        pass
+    return b""
+
+
+def has_controller_value(record, fields, label_names):
+    """Recognise controller candidates before Home Assistant validates their keys."""
+    value = declared_bytes(record, fields, "v_Data")
+    if TEXT_CONTROLLER.fullmatch(value):
+        return True
+    return len(value) == 64 and not (ACCESSORY_LABEL in label_names and TEXT_ACCESSORY.fullmatch(value))
 
 
 def main():
@@ -84,9 +102,14 @@ def main():
         has_controller = False
         for record in records:
             fields = pairing_fields(record)
-            if fields is not None:
-                selected.append(record)
-                has_controller = has_controller or has_controller_value(record, fields)
+            if fields is None:
+                continue
+            labels = {declared_bytes(record, fields, name) for name in ("svce", "labl", "desc")}
+            label_names = {label.partition(b":")[0] for label in labels}
+            if BTLE_LABEL in label_names:
+                continue
+            selected.append(record)
+            has_controller = has_controller or has_controller_value(record, fields, label_names)
         content = json.dumps({"General": selected}, separators=(",", ":")).encode("utf-8")
     except (OSError, KeyError, TypeError, ValueError, RecursionError):
         print(
