@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug fixes
 
-- Accept irestore keychain exports up to 6 MiB and provide a local tool to reduce larger exports to HomeKit pairing records before import.
+- None
 
 ### 🔧 Improvements
 
@@ -23,6 +23,28 @@ All notable changes to this project will be documented in this file.
 ### 🔄 Other changes
 
 - None
+
+## v1.3.1 - 2026-11-27
+
+### 🚧 Breaking changes
+
+- None
+
+### ✨ New features
+
+- None
+
+### 🐛 Bug fixes
+
+- Accept irestore keychain exports up to 6 MiB and provide a local tool to reduce larger exports to HomeKit pairing records before import.
+
+### 🔧 Improvements
+
+- None
+
+### 🔄 Other changes
+
+- Set the integration manifest and project version to `1.3.1`.
 
 ## v1.3.0 - 2026-11-27
 
