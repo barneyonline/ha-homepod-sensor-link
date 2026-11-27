@@ -25,11 +25,11 @@ def unique_fields(pairs):
     return result
 
 
-def is_homekit_record(record):
-    """Select live pairing records using irestore's declared field types."""
+def pairing_fields(record):
+    """Return declared field types for a live pairing record."""
     group = record.get("agrp")
     if group not in GROUP_VALUES.values():
-        return False
+        return None
     order, types = record.get("_fieldOrder"), record.get("_fieldTypes")
     if not isinstance(order, str) or not isinstance(types, str):
         raise ValueError
@@ -38,11 +38,30 @@ def is_homekit_record(record):
         raise ValueError
     fields = dict(zip(names, kinds))
     if GROUP_VALUES.get(fields["agrp"]) != group:
-        return False
+        return None
     tomb = record.get("tomb")
     if names.count("tomb") == 1 and fields["tomb"] == "int64" and type(tomb) is int and tomb == 1:
+        return None
+    if any((fields.get(name), record.get(name)) in BTLE_LABELS for name in ("svce", "labl", "desc")):
+        return None
+    return fields
+
+
+def has_controller_value(record, fields):
+    """Recognise a 64-byte controller record before Home Assistant validates its keys."""
+    value = record.get("v_Data")
+    if not isinstance(value, str):
         return False
-    return not any((fields.get(name), record.get(name)) in BTLE_LABELS for name in ("svce", "labl", "desc"))
+    kind = fields.get("v_Data")
+    if kind == "string":
+        return len(value) <= 64 and len(value.encode("utf-8")) == 64
+    # irestore's Base64 encoding of a 64-byte value occupies 88 characters.
+    if kind != "[]uint8" or len(value) != 88:
+        return False
+    try:
+        return len(base64.b64decode(value, validate=True)) == 64
+    except ValueError:
+        return False
 
 
 def main():
@@ -61,7 +80,13 @@ def main():
             records = []
         if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
             raise ValueError
-        selected = [record for record in records if is_homekit_record(record)]
+        selected = []
+        has_controller = False
+        for record in records:
+            fields = pairing_fields(record)
+            if fields is not None:
+                selected.append(record)
+                has_controller = has_controller or has_controller_value(record, fields)
         content = json.dumps({"General": selected}, separators=(",", ":")).encode("utf-8")
     except (OSError, KeyError, TypeError, ValueError, RecursionError):
         print(
@@ -72,6 +97,9 @@ def main():
 
     if not selected:
         print("No HomeKit pairing records were found in the irestore export.", file=sys.stderr)
+        return 1
+    if not has_controller:
+        print("The export contains no HomeKit controller identity. Try a fresh encrypted backup.", file=sys.stderr)
         return 1
     if len(content) > MAX_IMPORT_BYTES:
         print("The HomeKit records still exceed 6 MiB. Select the records for the intended HomePods.", file=sys.stderr)

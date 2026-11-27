@@ -381,6 +381,7 @@ class IrestoreReductionTests(unittest.TestCase):
             ('{"General":null}', "No HomeKit"),
             (json.dumps({"General": [record("deleted-account", b"disposable-deleted-data", tomb=1)]}), "No HomeKit"),
             (json.dumps({"General": [self.bluetooth_record()]}), "No HomeKit"),
+            (json.dumps({"General": dump()["General"][1:]}), "no HomeKit controller identity"),
             (json.dumps(large), "6 MiB"),
         ):
             with self.subTest(message=message), TemporaryDirectory() as directory:
