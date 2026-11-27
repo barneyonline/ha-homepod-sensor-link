@@ -307,9 +307,9 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(private.stat().st_mode & 0o777, 0o600)
         self.assertEqual(private.parent.stat().st_mode & 0o777, 0o700)
 
-    async def make_runtime(self, recovery=True):
+    async def make_runtime(self, recovery=True, *, phase="verified"):
         self.record["target"]["recovery"] = recovery
-        self.record["phase"] = "verified"
+        self.record["phase"] = phase
         await self.vault.put(self.key, self.record)
         config = entry({"device_keys": [self.key], "pins": {self.key: public_targets([self.target])[0]}})
         self.hass.config_entries._entries[config.entry_id] = config

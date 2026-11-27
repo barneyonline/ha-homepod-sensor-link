@@ -203,8 +203,8 @@ class RepositoryContractTests(unittest.TestCase):
 
     def test_deliberate_runtime_inventory_matches_hacs(self):
         config = json.loads((ROOT / "devtools/validation.json").read_text())
-        self.assertEqual(config["home_assistant"], ["2026.11.0"])
+        self.assertEqual(config["home_assistant"], ["2026.11.0", "2026.12.0b2"])
         self.assertEqual(set(config["coverage"]), set(config["home_assistant"]))
         self.assertEqual(config["aiohomekit"], "4.0.1")
         for version in config["home_assistant"]:
-            self.assertTrue(re.fullmatch(r"\d{4}\.\d+\.\d+", version))
+            self.assertTrue(re.fullmatch(r"\d{4}\.\d+\.\d+(?:b\d+)?", version))
