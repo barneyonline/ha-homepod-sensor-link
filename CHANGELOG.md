@@ -24,6 +24,31 @@ All notable changes to this project will be documented in this file.
 
 - None
 
+## v1.4.0 - 2026-11-28
+
+### 🚧 Breaking changes
+
+- None
+
+### ✨ New features
+
+- None
+
+### 🐛 Bug fixes
+
+- Import HomeKit controller keys and accessory identity keys stored as hexadecimal text in irestore exports. The local export reducer also recognises these records. (#36)
+- Discard stale credential and device setup results when a flow changes or the integration unloads, while preserving completed pairing work. (#38)
+
+### 🔧 Improvements
+
+- Keep Home Assistant responsive while large credential exports are parsed and validated. (#38)
+- Reduce protected storage writes when several HomePods activate together, while retaining each device's verified and active checkpoints. (#38)
+
+### 🔄 Other changes
+
+- Validate against Home Assistant 2026.12.0b2 alongside the existing 2026.11.0 minimum. (#37)
+- Set the integration manifest and project version to `1.4.0`.
+
 ## v1.3.1 - 2026-11-27
 
 ### 🚧 Breaking changes
