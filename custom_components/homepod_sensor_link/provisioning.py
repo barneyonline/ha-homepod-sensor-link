@@ -143,7 +143,7 @@ async def prepare(
             record.pop("authorised_boot", None)
         if record["phase"] == "prepared":
             record["authorised_boot"] = boot_id(hass)
-        if await vault.put(target["entry_id"], record, require_existing=required_key is not None, revision=revision):
+        if await vault.put(target["entry_id"], record, revision=revision):
             results.append(target["entry_id"])
     return results
 

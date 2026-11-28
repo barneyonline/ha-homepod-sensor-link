@@ -261,12 +261,14 @@ class Runtime:
             state.attempts = sorted(set(state.attempts + record.get("onboarding_attempts", [])))
         self.watchdog.check()
 
-    async def accept_inventory(self, data: Data, *, before_accept: Callable[[], None] | None = None) -> None:
+    async def accept_inventory(self, data: Data | Callable[[dict[str, Record]], Data]) -> dict[str, Record]:
         """Accept guided per-device results without unloading healthy peers."""
         async with self.engine.lock:
-            if before_accept is not None:
-                before_accept()
+            if self.stopped:
+                raise SafetyFailure("runtime_stopped")
             records = cast(Vault, self.vault).records()
+            if callable(data):
+                data = data(records)
             selected = {key: records[key] for key in data["device_keys"]}
             for key, record in selected.items():
                 if record["phase"] not in ("needs_credentials", "transition_required"):
@@ -278,6 +280,7 @@ class Runtime:
             self.hass.config_entries.async_update_entry(self.entry, data=data)
             self.sync_targets()
         self.coordinator.async_set_updated_data(self.engine.snapshot())
+        return selected
 
     def publish(self, target: Target, values: Readings) -> None:
         key = target["entry_id"]
@@ -392,11 +395,9 @@ class Runtime:
         revision = vault.activation_revision(key, record)
         if revision is None:
             return False
-        try:
-            await self.verify_publication(record["target"])
-        except (SafetyFailure, OSError):
-            return False
         target = record["target"]
+        if not self._can_activate(target):
+            return False
         fields = {"phase": "active", "commissioned": True, "error": None}
         active = {**record, **fields, "target": dict(target)}
         discard_source = not target.get("recovery", True)
@@ -404,7 +405,9 @@ class Runtime:
             active["target"].pop("source", None)
         cancellation = None
         try:
-            if not await vault.checkpoint(key, active, revision=revision):
+            if not await vault.checkpoint(
+                key, active, revision=revision, can_commit=partial(self._can_activate, target)
+            ):
                 return False
         except asyncio.CancelledError as error:
             # A cancelled vault write can still commit while its executor drains.
@@ -536,7 +539,19 @@ class Runtime:
             if key in self.records
         ]
 
+    def _can_activate(self, target: Target) -> bool:
+        if not self.engine.is_active():
+            return False
+        try:
+            self._verify_publication(target)
+        except (SafetyFailure, OSError):
+            return False
+        return True
+
     async def verify_publication(self, target: Target) -> None:
+        self._verify_publication(target)
+
+    def _verify_publication(self, target: Target) -> None:
         key = target["entry_id"]
         ids = self.entities.get(key, {})
         if set(ids) != {"temperature", "humidity"}:

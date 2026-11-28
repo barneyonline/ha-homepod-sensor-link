@@ -108,19 +108,19 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
         record_copies: list[int] = []
         snapshots = []
         write = vault_module._write
-        verify = runtime.verify_publication
+        verify = runtime._verify_publication
         checked = set()
 
         def record_checkpoint(config_dir, data):
             write(config_dir, data)
             snapshots.append({key: record["phase"] for key, record in data["records"].items()})
 
-        async def verify_checkpoint(target):
+        def verify_checkpoint(target):
             key = target["entry_id"]
             if retry_publication and key not in checked:
                 checked.add(key)
                 raise OSError("sensor_entities_not_ready")
-            await verify(target)
+            verify(target)
 
         def count_record_copy(value):
             if isinstance(value, dict):
@@ -140,7 +140,7 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(vault_module, "deepcopy", side_effect=count_record_copy),
                 patch.object(vault_module, "_write", side_effect=record_checkpoint) as committed,
                 patch.object(vault_module.os, "fsync", wraps=vault_module.os.fsync) as fsync,
-                patch.object(runtime, "verify_publication", side_effect=verify_checkpoint),
+                patch.object(runtime, "_verify_publication", side_effect=verify_checkpoint),
             ):
                 snapshot = await runtime.update()
                 self.assertEqual(self.backend.read_ha.await_count, count * (2 if retry_publication else 1))
@@ -238,6 +238,28 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.gather(poll, return_exceptions=True)
                         await platform.async_reset()
                         await runtime.stop()
+
+    async def test_activation_rechecks_both_actual_reports_after_waiting_for_vault(self):
+        config, runtime = await self.make_runtime(recovery=False)
+        platform = fixtures.sensor_platform(self.hass, config)
+        temperature = sensor.Measurement(runtime, self.target, "temperature")
+        humidity = sensor.Measurement(runtime, self.target, "humidity")
+        try:
+            await platform.async_add_entities([temperature, humidity])
+            runtime.publish(self.target, {"temperature": 21, "humidity": 45})
+            await runtime.verify_publication(self.target)
+            with patch.object(vault_module, "_write", wraps=vault_module._write) as write:
+                async with self.vault.lock:
+                    activation = asyncio.create_task(runtime.finish_publication(self.key))
+                    await asyncio.sleep(0)
+                    await humidity.async_remove()
+                self.assertFalse(await activation)
+            write.assert_not_called()
+            self.assertEqual(self.vault.record(self.key)["phase"], "verified")
+            self.assertIn("source", self.vault.record(self.key)["target"])
+        finally:
+            await platform.async_reset()
+            await runtime.stop()
 
     async def test_actual_entity_reports_scale_linearly_and_stay_fresh(self):
         for count in (1, 16, 64):

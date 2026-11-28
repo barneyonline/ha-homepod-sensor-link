@@ -4,7 +4,7 @@ import asyncio
 from datetime import timedelta
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 from homeassistant.config_entries import ConfigEntries
 from homeassistant.core import CoreState, HomeAssistant
@@ -162,7 +162,7 @@ class RuntimeWatchdogTests(unittest.IsolatedAsyncioTestCase):
         self.config, self.runtime = await self.make_runtime()
         self.runtime.records[self.key]["phase"] = "active"
         self.runtime.sync_targets()
-        self.runtime.verify_publication = AsyncMock()
+        self.runtime._verify_publication = Mock()
         self.backend.read_ha.side_effect = None
         self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
         self.watchdog = self.runtime.watchdog

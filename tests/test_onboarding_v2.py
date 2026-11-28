@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntries
 from homeassistant.core import HomeAssistant, CoreState
@@ -621,7 +621,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_recovery_keeps_verified_admin_after_publication(self):
         config, runtime = await self.make_runtime()
-        runtime.verify_publication = AsyncMock()
+        runtime._verify_publication = Mock()
         await runtime.finish_publication(self.key)
         self.assertIn("source", self.vault.records()[self.key]["target"])
         status = RecoveryStatus(runtime, self.target)

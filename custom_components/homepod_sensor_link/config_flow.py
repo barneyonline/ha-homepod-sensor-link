@@ -3,9 +3,9 @@
 from __future__ import annotations
 from contextlib import suppress
 from typing import cast
-from .models import Data, ProvisioningBackend
+from .models import Data, ProvisioningBackend, Record
 from homeassistant.auth.models import User
-from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigFlowResult, UnknownEntry
 from homeassistant.core import CoreState
 from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
@@ -114,8 +114,11 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_devices()
 
     async def async_step_reconfigure(self, user_input: Data | None = None) -> ConfigFlowResult:
+        step = self.cur_step
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
+        if updated := self._updated_step(step):
+            return updated
         options = ["devices", "credentials", "manage"]
         if any(record["phase"] == "transition_required" for record in self._vault.records().values()):
             options.insert(0, "transition")
@@ -126,7 +129,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
         async with self._credentials_lock:
-            if updated := self._updated_step(step):
+            if updated := self._updated_step(step, refresh=user_input is None):
                 return updated
             current = self._current()
             if current is None:
@@ -465,6 +468,9 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 for identifier in self._selected:
                     required_key = self._selected_keys.get(identifier)
+                    revision = self._vault.revision_for_accessory(
+                        identifier, preferred_keys=preferred_keys, required_key=required_key
+                    )
                     try:
                         async with asyncio.timeout(120):
                             keys = await prepare(
@@ -489,9 +495,8 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         previous = self._vault.record_for_accessory(
                             identifier, preferred_keys=preferred_keys, required_key=required_key
                         )
-                        if required_key is not None and previous is None:
+                        if previous != revision or (required_key is not None and previous is None):
                             continue
-                        revision = self._vault.record_revision(previous["target"]["entry_id"]) if previous else None
                         target = {"entry_id": uuid.uuid4().hex, "accessory_id": identifier, "owned": True}
                         target["recovery"] = identifier in self._recovery_ids
                         phase = "needs_credentials"
@@ -507,9 +512,7 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             else "verification_failed"
                         )
                         key = record["target"]["entry_id"]
-                        if await self._vault.put(
-                            key, record, require_existing=required_key is not None, revision=revision
-                        ):
+                        if await self._vault.put(key, record, revision=revision):
                             results.append(key)
             return results
         except Exception:
@@ -525,6 +528,46 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_progress_done(next_step_id="finish")
         return await self.async_step_finish()
 
+    def _inventory_data(self, current: ConfigEntry | None, keys: list[str], records: dict[str, Record]) -> Data:
+        self._ensure_open()
+        if current is not None and (
+            current.state is ConfigEntryState.UNLOAD_IN_PROGRESS
+            or self.hass.config_entries.async_get_entry(current.entry_id) is not current
+        ):
+            raise SafetyFailure("verification_failed")
+        all_keys = list(dict.fromkeys((current.data.get("device_keys", []) if current else []) + keys))
+        if any(key not in records for key in all_keys):
+            raise SafetyFailure("verification_failed")
+        if len({records[key]["target"]["accessory_id"].lower() for key in all_keys}) != len(all_keys):
+            raise SafetyFailure("verification_failed")
+        pins = {
+            key: public_targets([records[key]["target"]])[0] for key in all_keys if "ha_key" in records[key]["target"]
+        }
+        if current and any(pins.get(key) != value for key, value in current.data.get("pins", {}).items()):
+            raise SafetyFailure("verification_failed")
+        admin_pins = {key: records[key]["source_pin"] for key in all_keys if records[key].get("source_pin")}
+        if current and any(admin_pins.get(key) != value for key, value in current.data.get("admin_pins", {}).items()):
+            raise SafetyFailure("verification_failed")
+        return {"device_keys": all_keys, "pins": pins, "admin_pins": admin_pins}
+
+    def _verification_failed(self, keys: list[str], records: dict[str, Record], *, reauth: bool) -> bool:
+        missed = set(self._selected_keys.values()).difference(keys)
+        if reauth:
+            missed = {
+                key
+                for key in missed
+                if key in records
+                and (records[key]["target"].get("recovery", True) or records[key]["phase"] == "needs_credentials")
+            }
+        if not (self._transition_confirmed or reauth):
+            return False
+        return bool(missed) or any(
+            records[key]["phase"] in ("needs_credentials", "blocked")
+            or (self._transition_confirmed and records[key]["phase"] == "transition_required")
+            or records[key].get("error") == "verification_failed"
+            for key in keys
+        )
+
     async def async_step_finish(self, user_input: Data | None = None) -> ConfigFlowResult:
         if not await self._access():
             return self.async_abort(reason="local_admin_required")
@@ -532,59 +575,31 @@ class HomePodSensorLinkFlow(config_entries.ConfigFlow, domain=DOMAIN):
         keys = self._task.result()
         if not keys:
             return self.async_abort(reason="verification_failed")
-        current = self._current()
-        all_keys = list(dict.fromkeys((current.data.get("device_keys", []) if current else []) + keys))
-        records = self._vault.records()
-        if any(key not in records for key in all_keys):
+        try:
+            current = self._current()
+        except UnknownEntry:
             return self.async_abort(reason="verification_failed")
-        if len({records[key]["target"]["accessory_id"].lower() for key in all_keys}) != len(all_keys):
+        runtime = getattr(current, "runtime_data", None)
+        if runtime is not None and runtime.stopped:
+            runtime = None
+        try:
+            if runtime is not None:
+                records = await runtime.accept_inventory(lambda saved: self._inventory_data(current, keys, saved))
+            else:
+                records = self._vault.records()
+                data = self._inventory_data(current, keys, records)
+        except SafetyFailure:
             return self.async_abort(reason="verification_failed")
-        pins = {k: public_targets([records[k]["target"]])[0] for k in all_keys if "ha_key" in records[k]["target"]}
-        if current and any(pins.get(k) != value for k, value in current.data.get("pins", {}).items()):
-            return self.async_abort(reason="verification_failed")
-        admin_pins = {k: records[k]["source_pin"] for k in all_keys if records[k].get("source_pin")}
-        if current and any(admin_pins.get(k) != value for k, value in current.data.get("admin_pins", {}).items()):
-            return self.async_abort(reason="verification_failed")
-        if current:
-            runtime = getattr(current, "runtime_data", None)
-            failed = (
-                self._transition_confirmed
-                and any(
-                    records[key]["phase"] in ("transition_required", "needs_credentials", "blocked")
-                    or records[key].get("error") == "verification_failed"
-                    for key in keys
-                )
-            ) or (
-                self.context.get("source") == "reauth"
-                and any(
-                    records[key]["phase"] in ("needs_credentials", "blocked")
-                    or records[key].get("error") == "verification_failed"
-                    for key in keys
-                )
-            )
-            if runtime and not runtime.stopped:
-                await runtime.accept_inventory(
-                    {"device_keys": all_keys, "pins": pins, "admin_pins": admin_pins}, before_accept=self._ensure_open
-                )
-                self._committed = True
-                return self.async_abort(
-                    reason="verification_failed"
-                    if failed
-                    else "reauth_successful"
-                    if self.context.get("source") == "reauth"
-                    else "reconfigure_successful"
-                )
-            self._committed = True
-            if failed:
-                return self.async_abort(reason="verification_failed")
-            return self.async_update_reload_and_abort(
-                current, data={"device_keys": all_keys, "pins": pins, "admin_pins": admin_pins}
-            )
         self._committed = True
+        if current:
+            reauth = self.context.get("source") == "reauth"
+            if self._verification_failed(keys, records, reauth=reauth):
+                return self.async_abort(reason="verification_failed")
+            if runtime is not None:
+                return self.async_abort(reason="reauth_successful" if reauth else "reconfigure_successful")
+            return self.async_update_reload_and_abort(current, data=data)
         self._abort_if_unique_id_configured()
-        return self.async_create_entry(
-            title="HomePod Sensor Link", data={"device_keys": all_keys, "pins": pins, "admin_pins": admin_pins}
-        )
+        return self.async_create_entry(title="HomePod Sensor Link", data=data)
 
     async def async_step_manage(self, user_input: Data | None = None) -> ConfigFlowResult:
         """Choose a device before offering any actions."""

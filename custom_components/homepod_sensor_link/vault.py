@@ -1,7 +1,7 @@
 """Atomic private onboarding journal. No core config storage is edited."""
 
 from __future__ import annotations
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import cast
 from .models import Data, Record, Snapshot, Target
@@ -106,6 +106,7 @@ async def async_drain_future[T](future: asyncio.Future[T]) -> asyncio.CancelledE
 class _Checkpoint:
     record: Record
     revision: object | None
+    can_commit: Callable[[], bool] | None
     committed: bool = False
 
 
@@ -177,12 +178,23 @@ class Vault:
         self, accessory_id: str, *, preferred_keys: frozenset[str] = frozenset(), required_key: str | None = None
     ) -> Record | None:
         """Copy a configured match if available, otherwise copy the last matching record."""
+        return deepcopy(self._record_for_accessory(accessory_id, preferred_keys, required_key))
+
+    def revision_for_accessory(
+        self, accessory_id: str, *, preferred_keys: frozenset[str] = frozenset(), required_key: str | None = None
+    ) -> object | None:
+        """Capture the selected record before a preparation probe can yield."""
+        return self._record_for_accessory(accessory_id, preferred_keys, required_key)
+
+    def _record_for_accessory(
+        self, accessory_id: str, preferred_keys: frozenset[str], required_key: str | None
+    ) -> Record | None:
         identifier = accessory_id.lower()
         records = cast(dict[str, Record], self.data["records"])
         if required_key is not None:
             record = records.get(required_key)
             if record is not None and record["target"]["accessory_id"].lower() == identifier:
-                return deepcopy(record)
+                return record
             return None
         if self._accessory_index is None or self._accessory_index[0] is not records:
             index: dict[str, list[str]] = {}
@@ -193,7 +205,7 @@ class Vault:
         if keys is None:
             return None
         key = next((key for key in reversed(keys) if key in preferred_keys), keys[-1])
-        return deepcopy(records[key])
+        return records[key]
 
     async def _finish_io(
         self, task: asyncio.Future[None], data: Data, index: dict[str, list[str]] | None = None
@@ -221,14 +233,10 @@ class Vault:
         async with self.lock:
             yield
 
-    async def put(
-        self, key: str, record: Record, *, require_existing: bool = False, revision: object | None = None
-    ) -> bool:
+    async def put(self, key: str, record: Record, *, revision: object | None = None) -> bool:
         async with self._exclusive_write():
             records = self.data["records"]
             if revision is not None and records.get(key) != revision:
-                return False
-            if require_existing and key not in records:
                 return False
             # Vault-owned entries are replaced under the lock. Shared records
             # and states stay unchanged until the executor finishes serializing.
@@ -261,9 +269,16 @@ class Vault:
             await self._commit({**self.data, "records": {**records, key: deepcopy(updated)}})
             return updated
 
-    async def checkpoint(self, key: str, record: Record, *, revision: object | None = None) -> bool:
+    async def checkpoint(
+        self,
+        key: str,
+        record: Record,
+        *,
+        revision: object | None = None,
+        can_commit: Callable[[], bool] | None = None,
+    ) -> bool:
         """Share a durable commit among ready onboarding transitions."""
-        request = _Checkpoint(deepcopy(record), revision)
+        request = _Checkpoint(deepcopy(record), revision, can_commit)
         batch = self._checkpoint_batch
         if batch is not None and key not in batch.requests:
             batch.requests[key] = request
@@ -297,6 +312,8 @@ class Vault:
                 raise SafetyFailure("inventory_capacity")
             changes = {}
             for key, request in batch.requests.items():
+                if request.can_commit is not None and not request.can_commit():
+                    continue
                 current = records.get(key)
                 if request.revision is not None and current != request.revision:
                     continue
