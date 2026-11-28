@@ -98,11 +98,11 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             return True
 
-        async def put_record(device_key, record):
+        async def put_record(device_key, record, **kwargs):
             if device_key == key:
                 failed.set()
                 raise OSError()
-            return await put(device_key, record)
+            return await put(device_key, record, **kwargs)
 
         self.backend.read_ha.side_effect = read
         self.backend.restore_missing.side_effect = repair
@@ -208,10 +208,10 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
         checkpoint = self.vault.checkpoint
 
-        async def commit_record(key, record):
+        async def commit_record(key, record, **kwargs):
             if record["phase"] == "active":
                 raise OSError()
-            await checkpoint(key, record)
+            return await checkpoint(key, record, **kwargs)
 
         try:
             with (
@@ -231,6 +231,48 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
+    async def test_activation_keeps_newer_verified_record_but_accepts_learned_endpoint(self):
+        _, runtime = await self.make_runtime(recovery=False)
+        old = deepcopy(runtime.records[self.key])
+        newer = {**old, "flow_id": "new-disposable-flow", "target": {**old["target"], "recovery": True}}
+        try:
+            with patch.object(runtime, "verify_publication", AsyncMock()) as verify:
+                await self.vault.put(self.key, newer)
+                self.assertFalse(await runtime.finish_publication(self.key))
+                verify.assert_not_awaited()
+                self.assertEqual(self.vault.record(self.key), newer)
+
+                unpaired = {**old, "target": {key: value for key, value in old["target"].items() if key != "pairing"}}
+                await self.vault.put(self.key, unpaired)
+                self.assertFalse(await runtime.finish_publication(self.key))
+                verify.assert_not_awaited()
+                await self.vault.put(self.key, old)
+                runtime.records[self.key]["target"]["pairing"]["AccessoryIP"] = "192.0.2.5"
+                self.assertTrue(await runtime.finish_publication(self.key))
+                verify.assert_awaited_once()
+                self.assertEqual(self.vault.record(self.key)["target"]["pairing"]["AccessoryIP"], "192.0.2.5")
+        finally:
+            await runtime.stop()
+
+    async def test_activation_declines_change_queued_before_its_checkpoint(self):
+        _, runtime = await self.make_runtime()
+        try:
+            with patch.object(runtime, "verify_publication", AsyncMock()):
+                async with self.vault.lock:
+                    normal = asyncio.create_task(
+                        self.vault.put(self.key, {**runtime.records[self.key], "cancelled": True})
+                    )
+                    await asyncio.sleep(0)
+                    activation = asyncio.create_task(runtime.finish_publication(self.key))
+                    await asyncio.sleep(0)
+                await normal
+                self.assertFalse(await activation)
+                durable = self.vault.record(self.key)
+                self.assertTrue(durable["cancelled"])
+                self.assertEqual(durable["phase"], "verified")
+        finally:
+            await runtime.stop()
+
     async def test_final_publication_and_recovery_policy_commit_in_order(self):
         _, runtime = await self.make_runtime()
         runtime.engine.states[self.key].status = "healthy"
@@ -238,12 +280,12 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         writing, release = asyncio.Event(), asyncio.Event()
         checkpoint = self.vault.checkpoint
 
-        async def commit_record(key, record):
+        async def commit_record(key, record, **kwargs):
             if not writing.is_set():
                 self.assertEqual(record["phase"], "active")
                 writing.set()
                 await release.wait()
-            await checkpoint(key, record)
+            return await checkpoint(key, record, **kwargs)
 
         policy = None
         with (

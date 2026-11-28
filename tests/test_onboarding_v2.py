@@ -884,7 +884,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
             await checking
 
     async def test_lost_add_reply_requires_persisted_table_preservation_before_success(self):
-        _, runtime = await self.make_runtime()
+        _, runtime = await self.make_runtime(phase="write_uncertain")
         other_key = keypair()[1]
         other = {"pairingId": "other-original-controller", "publicKey": other_key, "permissions": 1}
         rows = [
@@ -943,9 +943,12 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
                 await backend.read_ha(saved)
             self.assertIn("expected_pairings", self.vault.records()[self.key]["target"])
             rows.append(other)
-            values = await backend.read_ha(saved)
+            provisioner = Provisioner(self.vault, backend, lambda: self.now[0], boot_id(self.hass))
+            verified, values = await provisioner.inspect(self.key)
             self.assertEqual(values, {"humidity": 45, "temperature": 20})
-            self.assertNotIn("expected_pairings", self.vault.records()[self.key]["target"])
+            self.assertEqual(verified["phase"], "verified")
+            self.assertNotIn("expected_pairings", verified["target"])
+            self.assertEqual(self.vault.record(self.key), verified)
             pairing.add_pairing.assert_awaited_once()
         finally:
             await runtime.stop()

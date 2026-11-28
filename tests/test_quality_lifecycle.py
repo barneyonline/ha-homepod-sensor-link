@@ -241,9 +241,9 @@ class QualityLifecycleTests(unittest.IsolatedAsyncioTestCase):
         config, runtime = await self.make_runtime()
         put = self.vault.put
 
-        async def remove_before_put(key, record, *, require_existing=False):
+        async def remove_before_put(key, record, **kwargs):
             await runtime.remove_device(key)
-            return await put(key, record, require_existing=require_existing)
+            return await put(key, record, **kwargs)
 
         try:
             async with self.flow_environment() as backend:
@@ -258,6 +258,48 @@ class QualityLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["reason"], "verification_failed")
             self.assertEqual(config.data["device_keys"], [])
             self.assertNotIn(self.key, self.vault.records())
+        finally:
+            await runtime.stop()
+
+    async def test_reauth_failure_cannot_replace_a_newer_vault_checkpoint(self):
+        config, runtime = await self.make_runtime()
+        put = self.vault.put
+        latest = {**self.vault.record(self.key), "phase": "write_uncertain", "onboarding_attempts": [900]}
+
+        async def checkpoint_before_put(key, record, **kwargs):
+            await put(key, latest)
+            return await put(key, record, **kwargs)
+
+        try:
+            async with self.flow_environment() as backend:
+                backend.read_ha.side_effect = OSError()
+                flow = self.flow(config)
+                await flow.async_step_reauth_confirm({})
+                with patch.object(self.vault, "put", side_effect=checkpoint_before_put) as save_failure:
+                    result = await self.finish_flow(
+                        flow, await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+                    )
+                    save_failure.assert_awaited_once()
+            self.assertEqual(result["reason"], "verification_failed")
+            self.assertEqual(self.vault.record(self.key), latest)
+        finally:
+            await runtime.stop()
+
+    async def test_open_reauthentication_does_not_reenable_recovery_after_disable(self):
+        config, runtime = await self.make_runtime(phase="active")
+        try:
+            async with self.flow_environment() as backend:
+                flow = self.flow(config)
+                await flow.async_step_reauth_confirm({})
+                self.assertTrue(await runtime.set_recovery(self.key, False))
+                result = await self.finish_flow(
+                    flow, await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+                )
+                self.assertEqual(result["reason"], "verification_failed")
+                backend.inspect_recovery.assert_not_awaited()
+            record = self.vault.record(self.key)
+            self.assertFalse(record["target"]["recovery"])
+            self.assertNotIn("source", record["target"])
         finally:
             await runtime.stop()
 

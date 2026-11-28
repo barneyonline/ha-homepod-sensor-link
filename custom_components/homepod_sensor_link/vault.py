@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import cast
-from .models import Data, Record, Snapshot
+from .models import Data, Record, Snapshot, Target
 from homeassistant.core import HomeAssistant
 
 
@@ -16,12 +16,24 @@ import os
 from pathlib import Path
 import secrets
 
-from .engine import SafetyFailure
+from .engine import RecoveryPaused, SafetyFailure
 from .secure_storage import _directory, _read_at
 
 DOMAIN = "homepod_sensor_link"
 DATA_FILE = ".storage/homepod_sensor_link/data.json"
 MAX_RECORDS = 64
+_ENDPOINT_FIELDS = frozenset(("AccessoryIP", "AccessoryIPs", "AccessoryPort"))
+
+
+def _without_endpoint(target: Target) -> Target:
+    pairing = target.get("pairing")
+    if pairing is None:
+        return target
+    return {**target, "pairing": {key: value for key, value in pairing.items() if key not in _ENDPOINT_FIELDS}}
+
+
+def _pairing_policy(target: Target) -> Target:
+    return _without_endpoint({key: value for key, value in target.items() if key != "expected_pairings"})
 
 
 def _write(config_dir: str, data: Data) -> None:
@@ -91,8 +103,15 @@ async def async_drain_future[T](future: asyncio.Future[T]) -> asyncio.CancelledE
 
 
 @dataclass(repr=False)
+class _Checkpoint:
+    record: Record
+    revision: object | None
+    committed: bool = False
+
+
+@dataclass(repr=False)
 class _CheckpointBatch:
-    records: dict[str, Record]
+    requests: dict[str, _Checkpoint]
     task: asyncio.Task[None] = field(init=False)
     sealed: bool = False
 
@@ -129,6 +148,30 @@ class Vault:
     def record(self, key: str) -> Record:
         """Return an isolated device without copying unrelated credentials."""
         return deepcopy(self.data["records"][key])
+
+    def record_revision(self, key: str) -> object:
+        """Capture the value a transition depends on without copying it again."""
+        # Writers replace vault-owned records rather than modifying them.
+        return self.data["records"][key]
+
+    def activation_revision(self, key: str, verified: Record) -> object | None:
+        """Bind activation to the record used for the fresh report."""
+        current = cast(dict[str, Record], self.data["records"]).get(key)
+        if current is None or current == verified:
+            return current
+        # Authentication may have learned a new endpoint. All other fields
+        # must still match the verified record, including reauth metadata.
+        expected = {**verified, "target": _without_endpoint(verified["target"])}
+        stored = {**current, "target": _without_endpoint(current["target"])}
+        return current if stored == expected else None
+
+    def inspection_revision(self, key: str, original: object, target: Target) -> object:
+        """Recognize pairing proof persisted by this inspection."""
+        current = cast(dict[str, Record], self.data["records"]).get(key)
+        previous = cast(Record, original)
+        if current == {**previous, "target": target} and _pairing_policy(previous["target"]) == _pairing_policy(target):
+            return current
+        return original
 
     def record_for_accessory(
         self, accessory_id: str, *, preferred_keys: frozenset[str] = frozenset(), required_key: str | None = None
@@ -178,9 +221,13 @@ class Vault:
         async with self.lock:
             yield
 
-    async def put(self, key: str, record: Record, *, require_existing: bool = False) -> bool:
+    async def put(
+        self, key: str, record: Record, *, require_existing: bool = False, revision: object | None = None
+    ) -> bool:
         async with self._exclusive_write():
             records = self.data["records"]
+            if revision is not None and records.get(key) != revision:
+                return False
             if require_existing and key not in records:
                 return False
             # Vault-owned entries are replaced under the lock. Shared records
@@ -192,14 +239,37 @@ class Vault:
             await self._commit({**self.data, "records": updated}, index)
             return True
 
-    async def checkpoint(self, key: str, record: Record) -> None:
+    async def checkpoint_pairing_target(self, target: Target, *, before_write: bool = False) -> Record:
+        """Persist pairing proof immediately while preserving current device controls."""
+        key = target["entry_id"]
+        async with self._exclusive_write():
+            records = cast(dict[str, Record], self.data["records"])
+            if len(records) > MAX_RECORDS:
+                raise SafetyFailure("inventory_capacity")
+            current = records.get(key)
+            if (
+                current is None
+                or (
+                    before_write
+                    and (current.get("cancelled") or current["phase"] not in ("active", "verified", "write_uncertain"))
+                )
+                or _pairing_policy(current["target"]) != _pairing_policy(target)
+            ):
+                raise RecoveryPaused()
+            updated = deepcopy(current)
+            updated["target"] = deepcopy(target)
+            await self._commit({**self.data, "records": {**records, key: deepcopy(updated)}})
+            return updated
+
+    async def checkpoint(self, key: str, record: Record, *, revision: object | None = None) -> bool:
         """Share a durable commit among ready onboarding transitions."""
+        request = _Checkpoint(deepcopy(record), revision)
         batch = self._checkpoint_batch
-        if batch is not None and key not in batch.records:
-            batch.records[key] = deepcopy(record)
+        if batch is not None and key not in batch.requests:
+            batch.requests[key] = request
         else:
             # A later transition of the same device needs its own durable commit.
-            batch = self._checkpoint_batch = _CheckpointBatch({key: deepcopy(record)})
+            batch = self._checkpoint_batch = _CheckpointBatch({key: request})
             # Enter the lock queue now, and collect distinct devices until
             # this writer starts.
             batch.task = asyncio.create_task(self._commit_checkpoints(batch), eager_start=True)
@@ -208,24 +278,37 @@ class Vault:
         except asyncio.CancelledError:
             if batch.sealed:
                 await async_drain_future(batch.task)
+                batch.task.result()
             else:
-                del batch.records[key]
+                del batch.requests[key]
             raise
+        return request.committed
 
     async def _commit_checkpoints(self, batch: _CheckpointBatch) -> None:
         async with self.lock:
             await asyncio.sleep(0)  # Let other ready devices join even when the lock was free.
             if self._checkpoint_batch is batch:
                 self._checkpoint_batch = None
-            if not batch.records:
+            if not batch.requests:
                 return
             batch.sealed = True
             records = cast(dict[str, Record], self.data["records"])
-            if not batch.records.keys() <= records.keys():
-                raise SafetyFailure("configured_inventory_changed")
             if len(records) > MAX_RECORDS:
                 raise SafetyFailure("inventory_capacity")
-            await self._commit({**self.data, "records": {**records, **batch.records}})
+            changes = {}
+            for key, request in batch.requests.items():
+                current = records.get(key)
+                if request.revision is not None and current != request.revision:
+                    continue
+                if current is None:
+                    raise SafetyFailure("configured_inventory_changed")
+                if request.record["phase"] == "active" and (current["phase"] != "verified" or current.get("cancelled")):
+                    continue
+                changes[key] = request.record
+            if changes:
+                await self._commit({**self.data, "records": {**records, **changes}})
+                for key in changes:
+                    batch.requests[key].committed = True
 
     def _index_after_put(self, key: str, record: Record) -> dict[str, list[str]] | None:
         records = self.data["records"]

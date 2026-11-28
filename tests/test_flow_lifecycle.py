@@ -1,5 +1,6 @@
 """HA flow boundaries: denied access, partial results and per-device management."""
 
+import asyncio
 from copy import deepcopy
 from contextlib import asynccontextmanager
 import json
@@ -7,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
 
 from custom_components.homepod_sensor_link import config_flow as flow_module
 from custom_components.homepod_sensor_link.credentials import DOMAIN
@@ -527,8 +528,64 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 flow.async_remove()
                 self.assertTrue(flow._committed)
                 runtime.stopped = True
+                reload_flow = self.flow("reconfigure", config)
+                reload_flow._task = self.hass.loop.create_future()
+                reload_flow._task.set_result([self.key])
                 with patch.object(self.hass.config_entries, "async_schedule_reload") as reload:
-                    await flow.async_step_finish()
+                    await reload_flow.async_step_finish()
                     reload.assert_called_once()
+        finally:
+            await runtime.stop()
+
+    async def test_aborted_finish_does_not_adopt_inventory_after_lock_wait(self):
+        config, runtime = await self.make_runtime()
+        before = config.data
+        try:
+            async with self.flow_environment():
+                for lock in (self.vault.lock, runtime.engine.lock):
+                    flow = self.flow("reconfigure", config)
+                    flow._task = self.hass.loop.create_future()
+                    flow._task.set_result([self.key])
+                    async with lock:
+                        request = asyncio.create_task(flow.async_step_finish())
+                        await asyncio.sleep(0)
+                        self.assertFalse(request.done())
+                        flow.async_remove()
+                    with self.assertRaises(UnknownFlow):
+                        await request
+                    self.assertFalse(flow._committed)
+                    self.assertIs(config.data, before)
+        finally:
+            await runtime.stop()
+
+    async def test_overlapping_transition_confirmations_keep_the_first_selection(self):
+        config, runtime = await self.make_runtime()
+        try:
+            peer = "disposable-peer"
+            first = {**self.vault.record(self.key), "phase": "transition_required"}
+            second = {
+                **first,
+                "target": {**first["target"], "entry_id": peer, "accessory_id": "disposable-other"},
+            }
+            await self.vault.put(self.key, first)
+            await self.vault.put(peer, second)
+            async with self.flow_environment():
+                flow = self.flow("reconfigure", config)
+                flow.cur_step = await flow.async_step_transition()
+
+                async def confirm(key):
+                    result = await flow.async_step_transition({"devices": [key], "confirm": True})
+                    flow.cur_step = result
+                    return result
+
+                async with self.vault.lock:
+                    accepted = asyncio.create_task(confirm(self.key))
+                    await asyncio.sleep(0)
+                    stale = asyncio.create_task(confirm(peer))
+                    await asyncio.sleep(0)
+                self.assertEqual(
+                    [result["step_id"] for result in await asyncio.gather(accepted, stale)], ["credentials"] * 2
+                )
+                self.assertEqual(flow._selected_keys, {self.target["accessory_id"].lower(): self.key})
         finally:
             await runtime.stop()

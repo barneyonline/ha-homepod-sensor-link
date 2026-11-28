@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from homeassistant.components.http.server import MAX_CLIENT_SIZE
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import CoreState
 from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
 from homeassistant.helpers.selector import TextSelector, TextSelectorConfig
 
@@ -670,7 +672,7 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
             parser.assert_called_once_with(content)
             self.assertEqual(flow._imported, expected)
 
-    async def test_queued_credential_refresh_returns_current_flow_step_without_discovery(self):
+    async def test_credential_refresh_preserves_submission_and_does_not_replay_discovery(self):
         manager = self.hass.config_entries.flow
         started, release = asyncio.Event(), asyncio.Event()
         discovered = {self.target["accessory_id"]: {"name": "Disposable HomePod"}}
@@ -691,16 +693,33 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
                 result = await manager.async_init(config_flow.DOMAIN, context={"source": "user"})
             flow_id = result["flow_id"]
             self.assertEqual(result["step_id"], "no_devices")
-            result = await manager.async_configure(flow_id, {"next_step_id": "import_missing"})
-            self.assertEqual(result["step_id"], "credential_export")
+            async with self.vault.lock:
+                navigation = asyncio.create_task(manager.async_configure(flow_id, {"next_step_id": "import_missing"}))
+                await asyncio.sleep(0)
+                stale_menu = asyncio.create_task(manager.async_configure(flow_id))
+                await asyncio.sleep(0)
+            for result in await asyncio.gather(navigation, stale_menu):
+                self.assertEqual(result["step_id"], "credential_export")
+            async with self.vault.lock:
+                invalid = asyncio.create_task(manager.async_configure(flow_id, {"credential_export": "invalid"}))
+                await asyncio.sleep(0)
+                stale_refresh = asyncio.create_task(manager.async_configure(flow_id))
+                await asyncio.sleep(0)
+            for result in await asyncio.gather(invalid, stale_refresh):
+                self.assertEqual(result["errors"], {"base": "invalid_credential_export"})
             with patch.object(config_flow, "discover_devices", side_effect=discover) as lookup:
-                first = asyncio.create_task(
-                    manager.async_configure(
-                        flow_id, {"credential_export": json.dumps(dump(self.source, self.accessory))}
+                async with self.vault.lock:
+                    initial_refresh = asyncio.create_task(manager.async_configure(flow_id))
+                    await asyncio.sleep(0)
+                    first = asyncio.create_task(
+                        manager.async_configure(
+                            flow_id, {"credential_export": json.dumps(dump(self.source, self.accessory))}
+                        )
                     )
-                )
+                    await asyncio.sleep(0)
                 refresh = None
                 try:
+                    self.assertEqual((await initial_refresh)["step_id"], "credential_export")
                     await asyncio.wait_for(started.wait(), 2)
                     refresh = asyncio.create_task(manager.async_configure(flow_id))
                     await asyncio.sleep(0)
@@ -713,6 +732,260 @@ class IrestoreFlowTests(unittest.IsolatedAsyncioTestCase):
             result = await manager.async_configure(flow_id, {"devices": list(discovered)})
             self.assertEqual(result["step_id"], "policy")
             manager.async_abort(flow_id)
+
+    async def test_cancelled_request_retrieves_parser_error_completed_before_drain(self):
+        worker = asyncio.get_running_loop().create_future()
+        async with self.flow_environment():
+            flow = self.flow()
+            with patch.object(self.hass, "async_add_executor_job", return_value=worker) as executor:
+                submission = asyncio.create_task(flow.async_step_credential_export({"credential_export": "invalid"}))
+                await asyncio.sleep(0)
+                executor.assert_called_once()
+                submission.cancel()
+                worker.set_exception(importer.CredentialExportError("invalid_credential_export"))
+                try:
+                    with self.assertRaises(asyncio.CancelledError):
+                        await submission
+                    self.assertFalse(worker._log_traceback)
+                finally:
+                    worker.exception()
+            self.assertIsNone(flow._imported)
+
+    async def test_handlers_waiting_for_access_return_the_new_step(self):
+        async with self.flow_environment():
+            for name in ("devices", "import_missing", "policy", "reauth_confirm", "transition"):
+                flow = self.flow()
+                flow.cur_step = flow.async_show_form(step_id="credential_export")
+                current = flow.async_show_form(step_id="transition")
+                async with self.vault.lock:
+                    delayed = asyncio.create_task(getattr(flow, f"async_step_{name}")())
+                    await asyncio.sleep(0)
+                    flow.cur_step = current
+                self.assertIs(await delayed, current)
+
+    async def test_credential_and_policy_requests_cannot_replace_inflight_preparation(self):
+        async with self.flow_environment():
+            flow = self.flow()
+            flow._selected = [self.target["accessory_id"]]
+            flow._recovery_ids = list(flow._selected)
+            preparation = asyncio.get_running_loop().create_future()
+            flow._task = preparation
+            try:
+                for name, payload in (
+                    ("credential_export", {"credential_export": "invalid"}),
+                    ("credential_manual", {"controller_id": "ignored"}),
+                    ("policy", {"recovery_devices": []}),
+                ):
+                    result = await getattr(flow, f"async_step_{name}")(payload)
+                    self.assertEqual(result["type"], FlowResultType.SHOW_PROGRESS)
+                    self.assertIs(result["progress_task"], preparation)
+                self.assertEqual(flow._recovery_ids, flow._selected)
+                self.assertIsNone(flow._imported)
+            finally:
+                preparation.cancel()
+
+    async def test_returning_parse_uses_flow_step_advanced_during_the_worker(self):
+        worker = asyncio.get_running_loop().create_future()
+        async with self.flow_environment():
+            flow = self.flow()
+            flow.cur_step = flow.async_show_form(step_id="credential_export")
+            current = flow.async_show_form(step_id="policy")
+            with patch.object(self.hass, "async_add_executor_job", return_value=worker) as executor:
+                submission = asyncio.create_task(flow.async_step_credential_export({"credential_export": "disposable"}))
+                await asyncio.sleep(0)
+                executor.assert_called_once()
+                flow.cur_step = current
+                worker.set_result(parse_export(json.dumps(dump(self.source, self.accessory))))
+                self.assertIs(await submission, current)
+            self.assertIsNone(flow._imported)
+
+    async def test_directed_discovery_respects_a_new_step_and_discards_on_shutdown(self):
+        async with self.flow_environment():
+            for shutdown in (False, True):
+                flow = self.flow()
+                flow._transition_confirmed = True
+                flow.cur_step = flow.async_show_form(step_id="credential_export")
+                current = flow.async_show_form(step_id="policy")
+                content = json.dumps(dump(self.source, self.accessory))
+                previous_state = self.hass.state
+
+                async def discover(_hass, *, hosts):
+                    if shutdown:
+                        self.hass.set_state(CoreState.stopping)
+                    else:
+                        flow.cur_step = current
+                    return {}
+
+                try:
+                    with patch.object(config_flow, "discover_devices", side_effect=discover):
+                        request = flow.async_step_credential_export({"credential_export": content})
+                        if shutdown:
+                            with self.assertRaises(UnknownFlow):
+                                await request
+                            self.assertIsNone(flow._imported)
+                        else:
+                            self.assertIs(await request, current)
+                        self.assertFalse(hasattr(flow, "_task"))
+                finally:
+                    self.hass.set_state(previous_state)
+
+    async def test_cancelling_client_keeps_credentials_if_preparation_already_owns_them(self):
+        started = asyncio.Event()
+        preparation = asyncio.get_running_loop().create_future()
+        async with self.flow_environment():
+            flow = self.flow()
+
+            async def ready():
+                flow._task = preparation
+                started.set()
+                await asyncio.Future()
+
+            with patch.object(flow, "_credentials_ready", side_effect=ready):
+                submission = asyncio.create_task(
+                    flow.async_step_credential_export(
+                        {"credential_export": json.dumps(dump(self.source, self.accessory))}
+                    )
+                )
+                try:
+                    await asyncio.wait_for(started.wait(), 2)
+                    submission.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await submission
+                    self.assertIsNotNone(flow._imported)
+                finally:
+                    submission.cancel()
+                    preparation.cancel()
+                    await asyncio.gather(submission, return_exceptions=True)
+
+    async def test_cancelled_discovery_does_not_stage_credentials_for_next_post(self):
+        started = asyncio.Event()
+
+        async def discover(_hass):
+            started.set()
+            await asyncio.Future()
+
+        async with self.flow_environment():
+            flow = self.flow()
+            with patch.object(config_flow, "discover_devices", side_effect=discover) as lookup:
+                submission = asyncio.create_task(
+                    flow.async_step_credential_export(
+                        {"credential_export": json.dumps(dump(self.source, self.accessory))}
+                    )
+                )
+                try:
+                    await asyncio.wait_for(started.wait(), 2)
+                    submission.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await submission
+                finally:
+                    if not submission.done():
+                        submission.cancel()
+                        await asyncio.gather(submission, return_exceptions=True)
+                self.assertIsNone(flow._imported)
+                result = await flow.async_step_credential_export({"credential_export": "invalid"})
+                self.assertEqual(result["errors"], {"base": "invalid_credential_export"})
+                lookup.assert_awaited_once()
+
+    async def test_stale_device_search_cannot_discard_a_credential_submission(self):
+        loop = asyncio.get_running_loop()
+        old_started, old_release, parsing = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        parse_release = threading.Event()
+        discovered = {self.target["accessory_id"]: {"name": "Disposable HomePod"}}
+        calls = 0
+
+        async def discover(_hass):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                old_started.set()
+                await old_release.wait()
+            return discovered
+
+        def parse(value):
+            loop.call_soon_threadsafe(parsing.set)
+            self.assertTrue(parse_release.wait(5))
+            return parse_export(value)
+
+        async with self.flow_environment():
+            manager = self.hass.config_entries.flow
+            with (
+                patch(
+                    "homeassistant.config_entries._async_get_flow_handler",
+                    AsyncMock(return_value=config_flow.HomePodSensorLinkFlow),
+                ),
+                patch.object(config_flow, "discover_devices", AsyncMock(return_value={})),
+            ):
+                initial = await manager.async_init(config_flow.DOMAIN, context={"source": "user"})
+            flow_id = initial["flow_id"]
+            with (
+                patch.object(config_flow, "discover_devices", side_effect=discover),
+                patch.object(config_flow, "parse_export", side_effect=parse),
+            ):
+                scan = asyncio.create_task(manager.async_configure(flow_id, {"next_step_id": "devices"}))
+                submission = None
+                try:
+                    await asyncio.wait_for(old_started.wait(), 2)
+                    await manager.async_configure(flow_id, {"next_step_id": "import_missing"})
+                    content = json.dumps(dump(self.source, self.accessory))
+                    submission = asyncio.create_task(manager.async_configure(flow_id, {"credential_export": content}))
+                    await asyncio.wait_for(parsing.wait(), 2)
+                    old_release.set()
+                    self.assertEqual((await scan)["step_id"], "credential_export")
+                    parse_release.set()
+                    self.assertEqual((await submission)["step_id"], "devices")
+                    self.assertEqual(manager._progress[flow_id]._imported, parse_export(content))
+                finally:
+                    old_release.set()
+                    parse_release.set()
+                    await asyncio.gather(scan, *([submission] if submission else []), return_exceptions=True)
+            manager.async_abort(flow_id)
+
+    async def test_export_completed_during_ha_shutdown_cannot_start_preparation(self):
+        loop = asyncio.get_running_loop()
+        parsing, stopping, stop_release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        parse_release = threading.Event()
+
+        def parse(value):
+            loop.call_soon_threadsafe(parsing.set)
+            self.assertTrue(parse_release.wait(5))
+            return parse_export(value)
+
+        async def hold_stop(_event):
+            stopping.set()
+            await stop_release.wait()
+
+        async with self.flow_environment():
+            manager = self.hass.config_entries.flow
+            with patch(
+                "homeassistant.config_entries._async_get_flow_handler",
+                AsyncMock(return_value=config_flow.HomePodSensorLinkFlow),
+            ):
+                result = await manager.async_init(config_flow.DOMAIN, context={"source": "user"})
+            flow_id = result["flow_id"]
+            await manager.async_configure(flow_id, {"devices": [self.target["accessory_id"]]})
+            await manager.async_configure(flow_id, {"recovery_devices": []})
+            await manager.async_configure(flow_id, {"next_step_id": "credential_export"})
+            flow = manager._progress[flow_id]
+            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, hold_stop)
+            content = json.dumps(dump(self.source, self.accessory))
+            with patch.object(config_flow, "parse_export", side_effect=parse):
+                submission = self.hass.async_create_task(
+                    manager.async_configure(flow_id, {"credential_export": content}), eager_start=False
+                )
+                shutdown = None
+                try:
+                    await asyncio.wait_for(parsing.wait(), 2)
+                    shutdown = asyncio.create_task(self.hass.async_stop(force=True))
+                    await asyncio.wait_for(stopping.wait(), 2)
+                    parse_release.set()
+                    with self.assertRaises(UnknownFlow):
+                        await asyncio.wait_for(submission, 2)
+                finally:
+                    parse_release.set()
+                    stop_release.set()
+                    await asyncio.gather(submission, *([shutdown] if shutdown else []), return_exceptions=True)
+            self.assertFalse(hasattr(flow, "_task"))
+            self.assertIsNone(flow._imported)
 
     async def test_abort_during_directed_discovery_cannot_start_onboarding(self):
         started, release = asyncio.Event(), asyncio.Event()

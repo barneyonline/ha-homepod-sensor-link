@@ -206,7 +206,7 @@ class Runtime:
         )
         self.backend.write_allowed = self.engine.is_active
         if self.vault:
-            self.backend.before_write = self.persist_pairing_checkpoint
+            self.backend.before_write = partial(self.persist_pairing_checkpoint, before_write=True)
             self.backend.after_write = self.persist_pairing_checkpoint
         # Keep the real backend for audit/provisioning and wrap successful owned
         # samples to publish through actual HA entities before health succeeds.
@@ -261,9 +261,11 @@ class Runtime:
             state.attempts = sorted(set(state.attempts + record.get("onboarding_attempts", [])))
         self.watchdog.check()
 
-    async def accept_inventory(self, data: Data) -> None:
+    async def accept_inventory(self, data: Data, *, before_accept: Callable[[], None] | None = None) -> None:
         """Accept guided per-device results without unloading healthy peers."""
         async with self.engine.lock:
+            if before_accept is not None:
+                before_accept()
             records = cast(Vault, self.vault).records()
             selected = {key: records[key] for key in data["device_keys"]}
             for key, record in selected.items():
@@ -312,12 +314,9 @@ class Runtime:
 
         return unsubscribe
 
-    async def persist_pairing_checkpoint(self, target: Target) -> None:
-        key = target["entry_id"]
-        record = cast(Vault, self.vault).record(key)
-        record["target"] = deepcopy(target)
-        await cast(Vault, self.vault).put(key, record)
-        self.records[key] = record
+    async def persist_pairing_checkpoint(self, target: Target, *, before_write: bool = False) -> None:
+        record = await cast(Vault, self.vault).checkpoint_pairing_target(target, before_write=before_write)
+        self.records[target["entry_id"]] = record
 
     async def read_target(self, target: Target) -> Readings:
         key = target["entry_id"]
@@ -389,6 +388,10 @@ class Runtime:
 
     async def finish_publication(self, key: str) -> bool:
         record = self.records[key]
+        vault = cast(Vault, self.vault)
+        revision = vault.activation_revision(key, record)
+        if revision is None:
+            return False
         try:
             await self.verify_publication(record["target"])
         except (SafetyFailure, OSError):
@@ -399,10 +402,10 @@ class Runtime:
         discard_source = not target.get("recovery", True)
         if discard_source:
             active["target"].pop("source", None)
-        vault = cast(Vault, self.vault)
         cancellation = None
         try:
-            await vault.checkpoint(key, active)
+            if not await vault.checkpoint(key, active, revision=revision):
+                return False
         except asyncio.CancelledError as error:
             # A cancelled vault write can still commit while its executor drains.
             if vault.record(key) != active:

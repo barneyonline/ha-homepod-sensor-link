@@ -11,7 +11,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.homepod_sensor_link import coordinator, sensor, vault as vault_module
 from custom_components.homepod_sensor_link.credentials import public_targets
-from custom_components.homepod_sensor_link.engine import INTERVAL, WINDOW
+from custom_components.homepod_sensor_link.engine import AuthenticationFailure, INTERVAL, WINDOW
 from custom_components.homepod_sensor_link.entity import DeviceSensor
 from custom_components.homepod_sensor_link.provisioning import make_owned
 from custom_components.homepod_sensor_link.vault import Vault
@@ -38,6 +38,45 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
             await self.check_activation_counts(config, runtime, 16, retry_publication=True)
         finally:
             await runtime.stop()
+
+    async def test_post_pairing_reads_batch_verification_after_individual_checkpoints(self):
+        count = 16
+        records = {}
+        for index in range(count):
+            target = make_owned(f"disposable-{index}", self.target["accessory_key"], {})
+            target["source"] = self.source
+            records[target["entry_id"]] = {**self.record, "target": target}
+        self.vault.data["records"] = deepcopy(records)
+        await self.vault.save_states({})
+        reads = dict.fromkeys(records, 0)
+        awaiting_verification = set()
+        ready = asyncio.Event()
+
+        async def read(target):
+            key = target["entry_id"]
+            reads[key] += 1
+            if reads[key] == 1:
+                raise AuthenticationFailure()
+            self.assertEqual(self.vault.record(key)["phase"], "accepted")
+            awaiting_verification.add(key)
+            if len(awaiting_verification) == count:
+                ready.set()
+            await ready.wait()
+            return {"temperature": 21, "humidity": 45}
+
+        async def restore(target):
+            self.assertEqual(self.vault.record(target["entry_id"])["phase"], "write_uncertain")
+            return True
+
+        self.backend.read_ha.side_effect = read
+        self.backend.restore_missing.side_effect = restore
+        with patch.object(vault_module, "_write", wraps=vault_module._write) as write:
+            results = await asyncio.wait_for(asyncio.gather(*(self.provisioner.inspect(key) for key in records)), 10)
+        self.assertEqual(write.call_count, 2 * count + 1)
+        self.assertEqual(reads, dict.fromkeys(records, 2))
+        self.assertTrue(all(record["phase"] == "verified" and readings for record, readings in results))
+        durable = (await Vault(self.hass).load()).records()
+        self.assertEqual({key: record["phase"] for key, record in durable.items()}, dict.fromkeys(records, "verified"))
 
     async def check_activation_counts(self, config, runtime, count, *, retry_publication=False):
         records = {}
@@ -155,10 +194,11 @@ class PublicationPerformanceTests(unittest.IsolatedAsyncioTestCase):
                 checkpoint = self.vault.checkpoint
                 elapsed = 0
 
-                async def commit_record(key, record):
-                    await checkpoint(key, record)
-                    if key == self.key and record["phase"] == "active":
+                async def commit_record(key, record, **kwargs):
+                    saved = await checkpoint(key, record, **kwargs)
+                    if saved and key == self.key and record["phase"] == "active":
                         committed.set()
+                    return saved
 
                 async def read(target):
                     if target["entry_id"] == peer_key:

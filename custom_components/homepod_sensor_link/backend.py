@@ -83,9 +83,14 @@ class HomeKitBackend:
                 raise SafetyFailure("existing_pairings_changed")
 
     async def clear_expected(self, target: Target) -> None:
-        target.pop("expected_pairings", None)
+        expected = target.pop("expected_pairings", None)
         if self.after_write:
-            await self.after_write(target)
+            try:
+                await self.after_write(target)
+            except BaseException:
+                if expected is not None:
+                    target["expected_pairings"] = expected
+                raise
 
     async def endpoint(self, target: Target, *, require_discovery: bool = False) -> Data:
         try:
