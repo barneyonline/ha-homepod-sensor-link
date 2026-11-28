@@ -206,7 +206,7 @@ class Runtime:
         )
         self.backend.write_allowed = self.engine.is_active
         if self.vault:
-            self.backend.before_write = self.persist_pairing_checkpoint
+            self.backend.before_write = partial(self.persist_pairing_checkpoint, before_write=True)
             self.backend.after_write = self.persist_pairing_checkpoint
         # Keep the real backend for audit/provisioning and wrap successful owned
         # samples to publish through actual HA entities before health succeeds.
@@ -261,10 +261,14 @@ class Runtime:
             state.attempts = sorted(set(state.attempts + record.get("onboarding_attempts", [])))
         self.watchdog.check()
 
-    async def accept_inventory(self, data: Data) -> None:
+    async def accept_inventory(self, data: Data | Callable[[dict[str, Record]], Data]) -> dict[str, Record]:
         """Accept guided per-device results without unloading healthy peers."""
         async with self.engine.lock:
+            if self.stopped:
+                raise SafetyFailure("runtime_stopped")
             records = cast(Vault, self.vault).records()
+            if callable(data):
+                data = data(records)
             selected = {key: records[key] for key in data["device_keys"]}
             for key, record in selected.items():
                 if record["phase"] not in ("needs_credentials", "transition_required"):
@@ -276,6 +280,7 @@ class Runtime:
             self.hass.config_entries.async_update_entry(self.entry, data=data)
             self.sync_targets()
         self.coordinator.async_set_updated_data(self.engine.snapshot())
+        return selected
 
     def publish(self, target: Target, values: Readings) -> None:
         key = target["entry_id"]
@@ -312,12 +317,9 @@ class Runtime:
 
         return unsubscribe
 
-    async def persist_pairing_checkpoint(self, target: Target) -> None:
-        key = target["entry_id"]
-        record = cast(Vault, self.vault).record(key)
-        record["target"] = deepcopy(target)
-        await cast(Vault, self.vault).put(key, record)
-        self.records[key] = record
+    async def persist_pairing_checkpoint(self, target: Target, *, before_write: bool = False) -> None:
+        record = await cast(Vault, self.vault).checkpoint_pairing_target(target, before_write=before_write)
+        self.records[target["entry_id"]] = record
 
     async def read_target(self, target: Target) -> Readings:
         key = target["entry_id"]
@@ -389,20 +391,24 @@ class Runtime:
 
     async def finish_publication(self, key: str) -> bool:
         record = self.records[key]
-        try:
-            await self.verify_publication(record["target"])
-        except (SafetyFailure, OSError):
+        vault = cast(Vault, self.vault)
+        revision = vault.activation_revision(key, record)
+        if revision is None:
             return False
         target = record["target"]
+        if not self._can_activate(target):
+            return False
         fields = {"phase": "active", "commissioned": True, "error": None}
         active = {**record, **fields, "target": dict(target)}
         discard_source = not target.get("recovery", True)
         if discard_source:
             active["target"].pop("source", None)
-        vault = cast(Vault, self.vault)
         cancellation = None
         try:
-            await vault.put(key, active)
+            if not await vault.checkpoint(
+                key, active, revision=revision, can_commit=partial(self._can_activate, target)
+            ):
+                return False
         except asyncio.CancelledError as error:
             # A cancelled vault write can still commit while its executor drains.
             if vault.record(key) != active:
@@ -441,9 +447,14 @@ class Runtime:
             if self.vault:
                 async with self.engine.lock:
                     if self.engine.is_active():
-                        for key, record in self.records.items():
-                            if record["phase"] == "verified" and self.engine.states[key].status == "healthy":
-                                await self.finish_publication(key)
+                        async with asyncio.TaskGroup() as group:
+                            await asyncio.gather(
+                                *(
+                                    group.create_task(self.finish_publication(key))
+                                    for key, record in self.records.items()
+                                    if record["phase"] == "verified" and self.engine.states[key].status == "healthy"
+                                )
+                            )
         return self.engine.snapshot()
 
     async def _check_devices(self) -> None:
@@ -528,7 +539,19 @@ class Runtime:
             if key in self.records
         ]
 
+    def _can_activate(self, target: Target) -> bool:
+        if not self.engine.is_active():
+            return False
+        try:
+            self._verify_publication(target)
+        except (SafetyFailure, OSError):
+            return False
+        return True
+
     async def verify_publication(self, target: Target) -> None:
+        self._verify_publication(target)
+
+    def _verify_publication(self, target: Target) -> None:
         key = target["entry_id"]
         ids = self.entities.get(key, {})
         if set(ids) != {"temperature", "humidity"}:

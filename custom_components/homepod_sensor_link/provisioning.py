@@ -61,6 +61,7 @@ async def prepare(
     *,
     flow_id: str | None = None,
     force_validate: bool = False,
+    preserve_recovery: bool = False,
     transition_confirmed: bool = False,
     preferred_keys: frozenset[str] = frozenset(),
     required_key: str | None = None,
@@ -71,6 +72,11 @@ async def prepare(
         previous = vault.record_for_accessory(identifier, preferred_keys=preferred_keys, required_key=required_key)
         if required_key is not None and previous is None:
             continue
+        recovery = identifier in recovery_ids
+        if preserve_recovery and previous is not None:
+            recovery = previous["target"].get("recovery", True)
+            if not recovery and previous["phase"] != "needs_credentials":
+                continue
         transitioning = previous is not None and previous["phase"] == "transition_required"
         if transitioning and not transition_confirmed:
             raise SafetyFailure("explicit_transition_required")
@@ -79,10 +85,11 @@ async def prepare(
             and not transitioning
             and not force_validate
             and previous["phase"] != "needs_credentials"
-            and not (identifier in recovery_ids and "source" not in previous["target"])
+            and not (recovery and "source" not in previous["target"])
         ):
             results.append(previous["target"]["entry_id"])
             continue
+        revision = vault.record_revision(previous["target"]["entry_id"]) if previous is not None else None
         if previous and "ha_key" in previous["target"]:
             target = previous["target"]
         else:
@@ -93,7 +100,7 @@ async def prepare(
             target = make_owned(raw_id, public, discovered[identifier].get("endpoint", {}))
         if previous and "ha_key" not in previous["target"]:
             target["entry_id"] = previous["target"]["entry_id"]
-        target["recovery"] = identifier in recovery_ids
+        target["recovery"] = recovery
         record = {
             **(previous or {}),
             "target": target,
@@ -136,7 +143,7 @@ async def prepare(
             record.pop("authorised_boot", None)
         if record["phase"] == "prepared":
             record["authorised_boot"] = boot_id(hass)
-        if await vault.put(target["entry_id"], record, require_existing=required_key is not None):
+        if await vault.put(target["entry_id"], record, revision=revision):
             results.append(target["entry_id"])
     return results
 
@@ -145,7 +152,13 @@ class Provisioner:
     def __init__(self, vault: Vault, backend: ProvisioningBackend, clock: Clock, boot: str) -> None:
         self.vault, self.backend, self.clock, self.boot = vault, backend, clock, boot
 
+    async def _save_inspection(self, key: str, record: Record, revision: object) -> Record:
+        if await self.vault.put(key, record, revision=revision):
+            return record
+        return self.vault.record(key)
+
     async def inspect(self, key: str, *, resume: bool = False) -> tuple[Record, Readings | None]:
+        revision = self.vault.record_revision(key)
         record = self.vault.record(key)
         if record.get("cancelled") and not resume:
             return record, None
@@ -164,20 +177,21 @@ class Provisioner:
         try:
             values = await self.backend.read_ha(target)
         except AuthenticationFailure:
-            values = None
+            pass
         except SafetyFailure:
             record.update(phase="blocked", error="identity_validation_failed")
-            await self.vault.put(key, record)
-            return record, None
+            return await self._save_inspection(key, record, revision), None
         except Exception:
             record["error"] = "device_unreachable"
             if record != previous:
-                await self.vault.put(key, record)
+                return await self._save_inspection(key, record, revision), None
             return record, None
         else:
             record.update(phase="verified", error=None)
             record.pop("authorised_boot", None)
-            await self.vault.put(key, record)
+            revision = self.vault.inspection_revision(key, revision, target)
+            if not await self.vault.checkpoint(key, record, revision=revision):
+                return self.vault.record(key), None
             return record, values
         initial_authorisation = record.pop("authorised_boot", None) == self.boot
         allowed = (resume or initial_authorisation) and not record.get("commissioned")
@@ -188,7 +202,7 @@ class Provisioner:
             # A status-only retry need not rewrite identical data. An endpoint
             # change or consumed boot authorisation still changes the record.
             if record != previous:
-                await self.vault.put(key, record)
+                return await self._save_inspection(key, record, revision), None
             return record, None
         # Persist before the first pairing operation, even if cancellation or an
         # ambiguous network result follows. Reuse this target on every retry.
@@ -196,33 +210,42 @@ class Provisioner:
         attempts = [t for t in record.get("onboarding_attempts", []) if now - t < 86400]
         if len(attempts) >= 3 or (attempts and now - attempts[-1] < 3600):
             record["error"] = "pairing_rate_limit"
-            await self.vault.put(key, record)
-            return record, None
+            return await self._save_inspection(key, record, revision), None
         record["onboarding_attempts"] = attempts + [now]
         record.update(phase="write_uncertain", error=None)
         record["last_onboarding_attempt"] = now
-        await self.vault.put(key, record)
+        if not await self.vault.put(key, record, revision=revision):
+            return self.vault.record(key), None
+        revision = self.vault.record_revision(key)
         try:
-            if await self.backend.pairing_present(target):
+            present = await self.backend.pairing_present(target)
+            if self.vault.record_revision(key) != revision:
+                return self.vault.record(key), None
+            if present:
                 # A present pairing which rejected its own pinned private key
                 # requires investigation. Never overwrite or re-add it.
                 raise SafetyFailure("accepted_pairing_rejected")
             await self.backend.restore_missing(target)
+            revision = self.vault.inspection_revision(key, revision, target)
             record["phase"] = "accepted"
-            await self.vault.put(key, record)
+            if not await self.vault.put(key, record, revision=revision):
+                return self.vault.record(key), None
+            revision = self.vault.record_revision(key)
             values = await self.backend.read_ha(target)
             record.update(phase="verified", error=None)
         except RecoveryPaused:
             record["error"] = "competing_recovery"
-            values = None
         except SafetyFailure:
             record.update(phase="blocked", error="pairing_safety_failed")
-            values = None
         except Exception:
             record["error"] = "onboarding_incomplete"
-            values = None
-        await self.vault.put(key, record)
-        return record, values
+        else:
+            revision = self.vault.inspection_revision(key, revision, target)
+            if not await self.vault.checkpoint(key, record, revision=revision):
+                return self.vault.record(key), None
+            return record, values
+        revision = self.vault.inspection_revision(key, revision, target)
+        return await self._save_inspection(key, record, revision), None
 
     async def cancel(self, key: str) -> None:
         record = self.vault.record(key)

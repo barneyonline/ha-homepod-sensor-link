@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntries
 from homeassistant.core import HomeAssistant, CoreState
@@ -621,7 +621,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_recovery_keeps_verified_admin_after_publication(self):
         config, runtime = await self.make_runtime()
-        runtime.verify_publication = AsyncMock()
+        runtime._verify_publication = Mock()
         await runtime.finish_publication(self.key)
         self.assertIn("source", self.vault.records()[self.key]["target"])
         status = RecoveryStatus(runtime, self.target)
@@ -884,7 +884,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
             await checking
 
     async def test_lost_add_reply_requires_persisted_table_preservation_before_success(self):
-        _, runtime = await self.make_runtime()
+        _, runtime = await self.make_runtime(phase="write_uncertain")
         other_key = keypair()[1]
         other = {"pairingId": "other-original-controller", "publicKey": other_key, "permissions": 1}
         rows = [
@@ -943,9 +943,12 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
                 await backend.read_ha(saved)
             self.assertIn("expected_pairings", self.vault.records()[self.key]["target"])
             rows.append(other)
-            values = await backend.read_ha(saved)
+            provisioner = Provisioner(self.vault, backend, lambda: self.now[0], boot_id(self.hass))
+            verified, values = await provisioner.inspect(self.key)
             self.assertEqual(values, {"humidity": 45, "temperature": 20})
-            self.assertNotIn("expected_pairings", self.vault.records()[self.key]["target"])
+            self.assertEqual(verified["phase"], "verified")
+            self.assertNotIn("expected_pairings", verified["target"])
+            self.assertEqual(self.vault.record(self.key), verified)
             pairing.add_pairing.assert_awaited_once()
         finally:
             await runtime.stop()

@@ -24,6 +24,355 @@ class DurableEdgeTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixtures.OnboardingTests.asyncSetUp
     asyncTearDown = fixtures.OnboardingTests.asyncTearDown
 
+    async def test_shutdown_cancellation_cannot_overtake_protected_write_with_purge(self):
+        await self.vault.put(self.key, self.record)
+        loop = asyncio.get_running_loop()
+        entered, release = asyncio.Event(), threading.Event()
+        write = vault_module._write
+
+        def blocked(config_dir, data):
+            loop.call_soon_threadsafe(entered.set)
+            self.assertTrue(release.wait(5))
+            write(config_dir, data)
+
+        verified = {**self.record, "phase": "verified"}
+        with patch.object(vault_module, "_write", blocked):
+            checkpoint = self.hass.async_create_task(self.vault.checkpoint(self.key, verified))
+            purge = None
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                # HA cancels background executor futures directly on stop.
+                for future in tuple(self.hass._background_tasks):
+                    if not isinstance(future, asyncio.Task):
+                        future.cancel()
+                purge = asyncio.create_task(self.vault.purge())
+                for _ in range(4):
+                    await asyncio.sleep(0)
+                self.assertFalse(checkpoint.done())
+                self.assertFalse(purge.done())
+                release.set()
+                await checkpoint
+                await purge
+            finally:
+                release.set()
+                await asyncio.gather(checkpoint, *([purge] if purge else []), return_exceptions=True)
+        self.assertFalse((Path(self.directory.name) / vault_module.DATA_FILE).exists())
+
+    async def test_later_checkpoint_cannot_join_batch_ahead_of_an_earlier_put(self):
+        peer = "disposable-peer"
+        await self.vault.put(self.key, self.record)
+        await self.vault.put(peer, self.record)
+        verified = {**self.record, "phase": "verified"}
+        reconfigured = {**self.record, "name": "Updated HomePod"}
+        with patch.object(vault_module, "_write", wraps=vault_module._write) as write:
+            async with self.vault.lock:
+                first = asyncio.create_task(self.vault.checkpoint(self.key, verified))
+                await asyncio.sleep(0)
+                normal = asyncio.create_task(self.vault.put(peer, reconfigured))
+                await asyncio.sleep(0)
+                last = asyncio.create_task(self.vault.checkpoint(peer, {**reconfigured, "phase": "verified"}))
+                await asyncio.sleep(0)
+            await asyncio.gather(first, normal, last)
+        self.assertEqual(
+            [args[1]["records"][peer] for args, _ in write.call_args_list],
+            [self.record, reconfigured, {**reconfigured, "phase": "verified"}],
+        )
+        self.assertEqual(self.vault.record(peer)["phase"], "verified")
+
+    async def test_cancelling_only_queued_checkpoint_withdraws_it_before_any_write(self):
+        await self.vault.put(self.key, self.record)
+        verified = {**self.record, "phase": "verified"}
+        with patch.object(vault_module, "_write", wraps=vault_module._write) as write:
+            async with self.vault.lock:
+                checkpoint = asyncio.create_task(self.vault.checkpoint(self.key, verified))
+                await asyncio.sleep(0)
+                checkpoint.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(checkpoint, 2)
+            # Drain the now-empty batch in FIFO order.
+            async with self.vault.lock:
+                write.assert_not_called()
+        self.assertEqual(self.vault.record(self.key), self.record)
+
+    async def test_cancelling_waiter_observes_write_failure_that_ends_before_drain(self):
+        await self.vault.put(self.key, self.record)
+        failure = asyncio.get_running_loop().create_future()
+        entered = asyncio.Event()
+
+        async def fail(_data):
+            entered.set()
+            await failure
+
+        with patch.object(self.vault, "_commit", side_effect=fail):
+            checkpoint = asyncio.create_task(self.vault.checkpoint(self.key, {**self.record, "phase": "verified"}))
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                failure.set_exception(OSError("disposable write failure"))
+                checkpoint.cancel()
+                with self.assertRaisesRegex(OSError, "disposable write failure"):
+                    await checkpoint
+            finally:
+                if not failure.done():
+                    failure.cancel()
+                await asyncio.gather(checkpoint, return_exceptions=True)
+        self.assertEqual(self.vault.record(self.key), self.record)
+
+    async def test_cancelled_checkpoint_joiner_drains_shared_write_before_purge(self):
+        peer = "disposable-peer"
+        await self.vault.put(self.key, self.record)
+        await self.vault.put(peer, self.record)
+        loop = asyncio.get_running_loop()
+        entered, release = asyncio.Event(), threading.Event()
+        write = vault_module._write
+        snapshots = []
+
+        def blocked(config_dir, data):
+            snapshots.append({key: record["phase"] for key, record in data["records"].items()})
+            loop.call_soon_threadsafe(entered.set)
+            self.assertTrue(release.wait(5))
+            write(config_dir, data)
+
+        verified = {**self.record, "phase": "verified"}
+        with patch.object(vault_module, "_write", blocked):
+            async with self.vault.lock:
+                owner = asyncio.create_task(self.vault.checkpoint(self.key, verified))
+                await asyncio.sleep(0)
+                joiner = asyncio.create_task(self.vault.checkpoint(peer, verified))
+                await asyncio.sleep(0)
+            purge = None
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                self.assertEqual(snapshots, [{self.key: "verified", peer: "verified"}])
+                purge = asyncio.create_task(self.vault.purge())
+                for _ in range(2):
+                    joiner.cancel()
+                    await asyncio.sleep(0)
+                    self.assertFalse(joiner.done())
+                    self.assertFalse(purge.done())
+                release.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await joiner
+                await owner
+                await purge
+            finally:
+                release.set()
+                await asyncio.gather(owner, joiner, *([purge] if purge else []), return_exceptions=True)
+        self.assertEqual(self.vault.records(), {})
+
+    async def test_same_device_checkpoints_are_separate_and_missing_record_stays_removed(self):
+        await self.vault.put(self.key, self.record)
+        verified = {**self.record, "phase": "verified"}
+        active = {**self.record, "phase": "active"}
+        with patch.object(vault_module, "_write", wraps=vault_module._write) as write:
+            await asyncio.gather(self.vault.checkpoint(self.key, verified), self.vault.checkpoint(self.key, active))
+            self.assertEqual(
+                [args[1]["records"][self.key]["phase"] for args, _ in write.call_args_list],
+                [
+                    "verified",
+                    "active",
+                ],
+            )
+        self.assertEqual((await vault_module.Vault(self.hass).load()).record(self.key), active)
+        await self.vault.remove(self.key)
+        with self.assertRaisesRegex(SafetyFailure, "configured_inventory_changed"):
+            await self.vault.checkpoint(self.key, active)
+        self.assertEqual((await vault_module.Vault(self.hass).load()).records(), {})
+
+    async def test_checkpoint_failure_preserves_previous_snapshot_and_allows_retry(self):
+        peer = "disposable-peer"
+        await self.vault.put(self.key, self.record)
+        await self.vault.put(peer, self.record)
+        verified = {**self.record, "phase": "verified"}
+        with patch.object(vault_module, "_write", side_effect=OSError) as write:
+            failed = await asyncio.gather(
+                self.vault.checkpoint(self.key, verified), self.vault.checkpoint(peer, verified), return_exceptions=True
+            )
+            write.assert_called_once()
+            self.assertEqual([type(error) for error in failed], [OSError, OSError])
+        prepared = dict.fromkeys((self.key, peer), self.record)
+        self.assertEqual(self.vault.records(), prepared)
+        self.assertEqual((await vault_module.Vault(self.hass).load()).records(), prepared)
+        await asyncio.gather(self.vault.checkpoint(self.key, verified), self.vault.checkpoint(peer, verified))
+        self.assertEqual(
+            (await vault_module.Vault(self.hass).load()).records(), dict.fromkeys((self.key, peer), verified)
+        )
+
+    async def test_fresh_inspection_does_not_overwrite_durable_flow_pause(self):
+        for error in (None, AuthenticationFailure, OSError, SafetyFailure):
+            with self.subTest(error=error):
+                await self.vault.put(self.key, {**self.record, "flow_id": "disposable-flow"})
+                started, release = asyncio.Event(), asyncio.Event()
+
+                async def read(_target):
+                    started.set()
+                    await release.wait()
+                    if error:
+                        raise error()
+                    return {"temperature": 21, "humidity": 44}
+
+                self.backend.read_ha.side_effect = read
+                inspection = asyncio.create_task(self.provisioner.inspect(self.key))
+                try:
+                    await asyncio.wait_for(started.wait(), 2)
+                    await self.vault.pause_flow("disposable-flow")
+                finally:
+                    release.set()
+                    record, readings = await inspection
+                self.assertIsNone(readings)
+                self.assertTrue(record["cancelled"])
+                self.assertEqual(record["phase"], "prepared")
+                self.assertNotIn("authorised_boot", record)
+                self.assertEqual((await vault_module.Vault(self.hass).load()).record(self.key), record)
+                self.backend.pairing_present.assert_not_awaited()
+                self.backend.restore_missing.assert_not_awaited()
+
+    async def test_paused_reservation_cannot_reach_pairing_after_presence_check(self):
+        await self.vault.put(self.key, {**self.record, "flow_id": "disposable-flow"})
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def pairing_present(_target):
+            started.set()
+            await release.wait()
+            return False
+
+        self.backend.pairing_present.side_effect = pairing_present
+        inspection = asyncio.create_task(self.provisioner.inspect(self.key))
+        try:
+            await asyncio.wait_for(started.wait(), 2)
+            await self.vault.pause_flow("disposable-flow")
+        finally:
+            release.set()
+            record, readings = await inspection
+        self.assertIsNone(readings)
+        self.assertTrue(record["cancelled"])
+        self.assertEqual(record["phase"], "write_uncertain")
+        self.backend.restore_missing.assert_not_awaited()
+
+    async def test_pairing_proof_keeps_current_pause_and_rejects_changed_policy(self):
+        await self.vault.put(self.key, {**self.record, "cancelled": True})
+        with self.assertRaises(vault_module.RecoveryPaused):
+            await self.vault.checkpoint_pairing_target(self.target, before_write=True)
+        result = await self.vault.checkpoint_pairing_target(self.target)
+        self.assertTrue(result["cancelled"])
+        self.assertEqual((await vault_module.Vault(self.hass).load()).record(self.key), result)
+        with self.assertRaises(vault_module.RecoveryPaused):
+            await self.vault.checkpoint_pairing_target({**self.target, "recovery": False})
+        await self.vault.put(self.key, self.record)
+        with self.assertRaises(vault_module.RecoveryPaused):
+            await self.vault.checkpoint_pairing_target(self.target, before_write=True)
+        await self.vault.remove(self.key)
+        with self.assertRaises(vault_module.RecoveryPaused):
+            await self.vault.checkpoint_pairing_target(self.target)
+
+    async def test_guided_reauth_does_not_replace_a_newer_pairing_reservation(self):
+        await self.vault.put(self.key, self.record)
+        started, release = asyncio.Event(), asyncio.Event()
+        identifier = self.target["accessory_id"]
+
+        async def inspect(_target):
+            started.set()
+            await release.wait()
+            return {"recovery_admin_verified": True}
+
+        self.backend.inspect_recovery.side_effect = inspect
+        self.backend.read_ha.side_effect = None
+        self.backend.read_ha.return_value = {"temperature": 21, "humidity": 44}
+        task = asyncio.create_task(
+            prepare(
+                self.hass,
+                self.vault,
+                self.backend,
+                [identifier],
+                [identifier],
+                {"controllers": [self.source]},
+                {identifier: {"name": "Disposable HomePod"}},
+                force_validate=True,
+                required_key=self.key,
+            )
+        )
+        try:
+            await asyncio.wait_for(started.wait(), 2)
+            reserved = {**self.record, "phase": "write_uncertain", "onboarding_attempts": [1]}
+            reserved.pop("authorised_boot")
+            await self.vault.put(self.key, reserved)
+        finally:
+            release.set()
+            results = await task
+        self.assertEqual(results, [])
+        self.assertEqual(self.vault.record(self.key), reserved)
+
+    async def test_activation_cannot_override_current_prepared_or_cancelled_records(self):
+        active = {**self.record, "phase": "active"}
+        for current in (self.record, {**self.record, "phase": "verified", "cancelled": True}):
+            await self.vault.put(self.key, current)
+            self.assertFalse(
+                await self.vault.checkpoint(self.key, active, revision=self.vault.record_revision(self.key))
+            )
+            self.assertEqual(self.vault.record(self.key), current)
+
+    async def test_checkpoint_rejects_an_oversized_previous_inventory(self):
+        records = {f"disposable-{index}": self.record for index in range(vault_module.MAX_RECORDS)}
+        records[self.key] = self.record
+        self.vault.data["records"] = records
+        with (
+            patch.object(vault_module, "_write") as write,
+            self.assertRaisesRegex(SafetyFailure, "inventory_capacity"),
+        ):
+            await self.vault.checkpoint(self.key, {**self.record, "phase": "verified"})
+        write.assert_not_called()
+        with (
+            patch.object(vault_module, "_write") as write,
+            self.assertRaisesRegex(SafetyFailure, "inventory_capacity"),
+        ):
+            await self.vault.checkpoint_pairing_target(self.target, before_write=True)
+        write.assert_not_called()
+
+    async def test_pairing_failure_keeps_persisted_proof_and_failure_status(self):
+        for error, phase, status in (
+            (SafetyFailure, "blocked", "pairing_safety_failed"),
+            (OSError, "write_uncertain", "onboarding_incomplete"),
+        ):
+            with self.subTest(error=error):
+                await self.vault.put(self.key, self.record)
+                proof = [{"pairingId": "disposable-peer", "publicKey": self.target["ha_key"], "permissions": 0}]
+
+                async def restore(target):
+                    target["expected_pairings"] = proof
+                    await self.vault.checkpoint_pairing_target(target, before_write=True)
+                    raise error()
+
+                self.backend.restore_missing.side_effect = restore
+                record, readings = await self.provisioner.inspect(self.key)
+                self.assertIsNone(readings)
+                self.assertEqual((record["phase"], record["error"]), (phase, status))
+                self.assertEqual(record["target"]["expected_pairings"], proof)
+                self.assertEqual((await vault_module.Vault(self.hass).load()).record(self.key), record)
+
+    async def test_post_pairing_pause_survives_restore_and_verification(self):
+        for pause_at in ("restore", "verify"):
+            with self.subTest(pause_at=pause_at):
+                await self.vault.put(self.key, {**self.record, "flow_id": "disposable-flow"})
+                self.backend.read_ha.reset_mock()
+
+                async def restore(_target):
+                    if pause_at == "restore":
+                        await self.vault.pause_flow("disposable-flow")
+                    return True
+
+                async def read(_target):
+                    if self.backend.read_ha.await_count == 1:
+                        raise AuthenticationFailure()
+                    await self.vault.pause_flow("disposable-flow")
+                    return {"temperature": 21, "humidity": 44}
+
+                self.backend.restore_missing.side_effect = restore
+                self.backend.read_ha.side_effect = read
+                record, readings = await self.provisioner.inspect(self.key)
+                self.assertIsNone(readings)
+                self.assertTrue(record["cancelled"])
+                self.assertEqual(record["phase"], "write_uncertain" if pause_at == "restore" else "accepted")
+                self.assertEqual((await vault_module.Vault(self.hass).load()).record(self.key), record)
+
     async def test_cancelled_write_drains_before_purge_can_acquire_lock(self):
         entered, release = threading.Event(), threading.Event()
         write = vault_module._write

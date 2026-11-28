@@ -4,7 +4,7 @@ import asyncio
 from copy import deepcopy
 import threading
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -80,7 +80,7 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         state = runtime.engine.states[self.key]
         state.auth_failures, state.auth_since = 2, 0
         runtime.engine.verify_publication = AsyncMock()
-        runtime.verify_publication = AsyncMock()
+        runtime._verify_publication = Mock()
         reserved, failed, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
         put = self.vault.put
 
@@ -98,11 +98,11 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             return True
 
-        async def put_record(device_key, record):
+        async def put_record(device_key, record, **kwargs):
             if device_key == key:
                 failed.set()
                 raise OSError()
-            return await put(device_key, record)
+            return await put(device_key, record, **kwargs)
 
         self.backend.read_ha.side_effect = read
         self.backend.restore_missing.side_effect = repair
@@ -206,28 +206,70 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         _, runtime = await self.make_runtime(recovery=False)
         self.backend.read_ha.side_effect = None
         self.backend.read_ha.return_value = {"temperature": 21, "humidity": 45}
-        put = self.vault.put
+        checkpoint = self.vault.checkpoint
 
-        async def put_record(key, record):
+        async def commit_record(key, record, **kwargs):
             if record["phase"] == "active":
                 raise OSError()
-            await put(key, record)
+            return await checkpoint(key, record, **kwargs)
 
         try:
             with (
-                patch.object(runtime, "verify_publication", AsyncMock()),
-                patch.object(self.vault, "put", side_effect=put_record),
+                patch.object(runtime, "_verify_publication", Mock()),
+                patch.object(self.vault, "checkpoint", side_effect=commit_record),
                 self.assertRaises(OSError),
             ):
                 await runtime.inspect_pending(self.key)
             self.assertEqual(runtime.records[self.key]["phase"], "verified")
             self.assertIn("source", runtime.records[self.key]["target"])
             self.assertEqual(runtime.records[self.key], self.vault.record(self.key))
-            with patch.object(runtime, "verify_publication", AsyncMock()):
+            with patch.object(runtime, "_verify_publication", Mock()):
                 self.assertIs(await runtime.inspect_pending(self.key), coordinator.PendingInspection.REPORTS_VERIFIED)
             self.assertEqual(self.backend.read_ha.await_count, 2)
             self.assertEqual(self.vault.record(self.key)["phase"], "active")
             self.assertNotIn("source", self.vault.record(self.key)["target"])
+        finally:
+            await runtime.stop()
+
+    async def test_activation_keeps_newer_verified_record_but_accepts_learned_endpoint(self):
+        _, runtime = await self.make_runtime(recovery=False)
+        old = deepcopy(runtime.records[self.key])
+        newer = {**old, "flow_id": "new-disposable-flow", "target": {**old["target"], "recovery": True}}
+        try:
+            with patch.object(runtime, "_verify_publication", Mock()) as verify:
+                await self.vault.put(self.key, newer)
+                self.assertFalse(await runtime.finish_publication(self.key))
+                verify.assert_not_called()
+                self.assertEqual(self.vault.record(self.key), newer)
+
+                unpaired = {**old, "target": {key: value for key, value in old["target"].items() if key != "pairing"}}
+                await self.vault.put(self.key, unpaired)
+                self.assertFalse(await runtime.finish_publication(self.key))
+                verify.assert_not_called()
+                await self.vault.put(self.key, old)
+                runtime.records[self.key]["target"]["pairing"]["AccessoryIP"] = "192.0.2.5"
+                self.assertTrue(await runtime.finish_publication(self.key))
+                self.assertEqual(verify.call_count, 2)
+                self.assertEqual(self.vault.record(self.key)["target"]["pairing"]["AccessoryIP"], "192.0.2.5")
+        finally:
+            await runtime.stop()
+
+    async def test_activation_declines_change_queued_before_its_checkpoint(self):
+        _, runtime = await self.make_runtime()
+        try:
+            with patch.object(runtime, "_verify_publication", Mock()):
+                async with self.vault.lock:
+                    normal = asyncio.create_task(
+                        self.vault.put(self.key, {**runtime.records[self.key], "cancelled": True})
+                    )
+                    await asyncio.sleep(0)
+                    activation = asyncio.create_task(runtime.finish_publication(self.key))
+                    await asyncio.sleep(0)
+                await normal
+                self.assertFalse(await activation)
+                durable = self.vault.record(self.key)
+                self.assertTrue(durable["cancelled"])
+                self.assertEqual(durable["phase"], "verified")
         finally:
             await runtime.stop()
 
@@ -236,21 +278,21 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         runtime.engine.states[self.key].status = "healthy"
         target = runtime.records[self.key]["target"]
         writing, release = asyncio.Event(), asyncio.Event()
-        put = self.vault.put
+        checkpoint = self.vault.checkpoint
 
-        async def put_record(key, record):
+        async def commit_record(key, record, **kwargs):
             if not writing.is_set():
                 self.assertEqual(record["phase"], "active")
                 writing.set()
                 await release.wait()
-            await put(key, record)
+            return await checkpoint(key, record, **kwargs)
 
         policy = None
         with (
             patch.object(runtime.engine, "check_all", AsyncMock()),
             patch.object(runtime.audit, "check", AsyncMock()),
-            patch.object(runtime, "verify_publication", AsyncMock()),
-            patch.object(self.vault, "put", side_effect=put_record),
+            patch.object(runtime, "_verify_publication", Mock()),
+            patch.object(self.vault, "checkpoint", side_effect=commit_record),
         ):
             poll = asyncio.create_task(runtime.update())
             try:
@@ -302,7 +344,7 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
                             AsyncMock(wraps=runtime.engine.check_all if inspecting else None),
                         ),
                         patch.object(runtime.audit, "check", AsyncMock()),
-                        patch.object(runtime, "verify_publication", AsyncMock()),
+                        patch.object(runtime, "_verify_publication", Mock()),
                         patch.object(vault_module, "_write", delayed_write),
                     ):
                         if writing:
@@ -321,7 +363,7 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
                                 await asyncio.gather(poll, return_exceptions=True)
                         else:
                             with (
-                                patch.object(self.vault, "put", AsyncMock(side_effect=asyncio.CancelledError)),
+                                patch.object(self.vault, "checkpoint", AsyncMock(side_effect=asyncio.CancelledError)),
                                 self.assertRaises(asyncio.CancelledError),
                             ):
                                 await runtime.update()
@@ -350,6 +392,35 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(runtime.closed)
         self.assertEqual(self.vault.record(self.key)["phase"], "verified")
 
+    async def test_final_activation_queued_before_stop_never_starts_a_write(self):
+        _, runtime = await self.make_runtime(recovery=False)
+        pending = asyncio.Event()
+        checkpoint = self.vault.checkpoint
+
+        async def submit(*args, **kwargs):
+            pending.set()
+            return await checkpoint(*args, **kwargs)
+
+        with (
+            patch.object(runtime.engine, "check_all", AsyncMock()),
+            patch.object(runtime.audit, "check", AsyncMock()),
+            patch.object(runtime, "_verify_publication", Mock()),
+            patch.object(self.vault, "checkpoint", side_effect=submit),
+            patch.object(vault_module, "_write", wraps=vault_module._write) as write,
+        ):
+            runtime.engine.states[self.key].status = "healthy"
+            async with self.vault.lock:
+                poll = asyncio.create_task(runtime.update())
+                await asyncio.wait_for(pending.wait(), 2)
+                stop = asyncio.create_task(runtime.stop())
+                await asyncio.sleep(0)
+                self.assertTrue(runtime.stopped)
+            await asyncio.wait_for(asyncio.gather(poll, stop), 2)
+        write.assert_not_called()
+        record = self.vault.record(self.key)
+        self.assertEqual(record["phase"], "verified")
+        self.assertIn("source", record["target"])
+
     async def test_verified_activation_preserves_pending_repair_publication_policy(self):
         _, runtime = await self.make_runtime(recovery=False)
         self.backend.read_ha.side_effect = None
@@ -359,11 +430,11 @@ class RuntimeCompletionTests(unittest.IsolatedAsyncioTestCase):
         state.publication_pending = state.pending_pairing_added = True
         try:
             with (
-                patch.object(runtime, "verify_publication", AsyncMock()) as verify_activation,
+                patch.object(runtime, "_verify_publication", Mock()) as verify_activation,
                 patch.object(runtime.engine, "verify_publication", AsyncMock()) as verify_repair,
             ):
                 await runtime.update()
-            verify_activation.assert_awaited_once()
+            self.assertEqual(verify_activation.call_count, 2)
             verify_repair.assert_awaited_once()
             self.assertEqual(self.backend.read_ha.await_count, 2)
             self.backend.restore_missing.assert_not_awaited()

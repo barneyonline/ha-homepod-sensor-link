@@ -1,5 +1,6 @@
 """HA flow boundaries: denied access, partial results and per-device management."""
 
+import asyncio
 from copy import deepcopy
 from contextlib import asynccontextmanager
 import json
@@ -7,7 +8,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
 
 from custom_components.homepod_sensor_link import config_flow as flow_module
 from custom_components.homepod_sensor_link.credentials import DOMAIN
@@ -472,6 +474,33 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
+    async def test_reconfigure_refresh_cannot_rewind_credentials_navigation(self):
+        config, runtime = await self.make_runtime()
+        manager = self.hass.config_entries.flow
+        try:
+            async with self.flow_environment():
+                with patch(
+                    "homeassistant.config_entries._async_get_flow_handler",
+                    AsyncMock(return_value=flow_module.HomePodSensorLinkFlow),
+                ):
+                    initial = await manager.async_init(
+                        DOMAIN, context={"source": "reconfigure", "entry_id": config.entry_id}
+                    )
+                flow_id = initial["flow_id"]
+                async with self.vault.lock:
+                    navigation = asyncio.create_task(manager.async_configure(flow_id, {"next_step_id": "credentials"}))
+                    await asyncio.sleep(0)
+                    stale = asyncio.create_task(manager.async_configure(flow_id))
+                    await asyncio.sleep(0)
+                self.assertEqual(
+                    [result["step_id"] for result in await asyncio.gather(navigation, stale)], ["credentials"] * 2
+                )
+                export = await manager.async_configure(flow_id, {"next_step_id": "credential_export"})
+                self.assertEqual(export["step_id"], "credential_export")
+                manager.async_abort(flow_id)
+        finally:
+            await runtime.stop()
+
     async def test_real_flow_manager_routes_device_menu_and_confirmed_removal(self):
         config, runtime = await self.make_runtime()
         manager = self.hass.config_entries.flow
@@ -527,8 +556,150 @@ class FlowLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 flow.async_remove()
                 self.assertTrue(flow._committed)
                 runtime.stopped = True
+                reload_flow = self.flow("reconfigure", config)
+                reload_flow._task = self.hass.loop.create_future()
+                reload_flow._task.set_result([self.key])
                 with patch.object(self.hass.config_entries, "async_schedule_reload") as reload:
-                    await flow.async_step_finish()
+                    await reload_flow.async_step_finish()
                     reload.assert_called_once()
+        finally:
+            await runtime.stop()
+
+    async def test_aborted_finish_does_not_adopt_inventory_after_lock_wait(self):
+        config, runtime = await self.make_runtime()
+        before = config.data
+        try:
+            async with self.flow_environment():
+                for lock in (self.vault.lock, runtime.engine.lock):
+                    flow = self.flow("reconfigure", config)
+                    flow._task = self.hass.loop.create_future()
+                    flow._task.set_result([self.key])
+                    async with lock:
+                        request = asyncio.create_task(flow.async_step_finish())
+                        await asyncio.sleep(0)
+                        self.assertFalse(request.done())
+                        flow.async_remove()
+                    with self.assertRaises(UnknownFlow):
+                        await request
+                    self.assertFalse(flow._committed)
+                    self.assertIs(config.data, before)
+        finally:
+            await runtime.stop()
+
+    async def test_finish_cannot_accept_inventory_after_runtime_stops(self):
+        config, runtime = await self.make_runtime()
+        before = config.data
+        async with self.flow_environment():
+            flow = self.flow("reconfigure", config)
+            flow._task = self.hass.loop.create_future()
+            flow._task.set_result([self.key])
+            async with runtime.engine.lock:
+                finish = asyncio.create_task(flow.async_step_finish())
+                await asyncio.sleep(0)
+                self.assertFalse(finish.done())
+                stop = asyncio.create_task(runtime.stop())
+                await asyncio.sleep(0)
+                self.assertTrue(runtime.stopped)
+            try:
+                self.assertEqual((await finish)["reason"], "verification_failed")
+                self.assertIs(config.data, before)
+            finally:
+                await stop
+
+    async def test_finish_cannot_reload_an_entry_being_unloaded_or_already_removed(self):
+        config, runtime = await self.make_runtime()
+        before = config.data
+        try:
+            with patch.object(self.hass.config_entries, "async_schedule_reload") as reload:
+                async with self.flow_environment():
+                    runtime.stopped = True
+                    config._async_set_state(self.hass, ConfigEntryState.UNLOAD_IN_PROGRESS, None)
+                    for removed in (False, True):
+                        if removed:
+                            self.hass.config_entries._entries.pop(config.entry_id)
+                        flow = self.flow("reconfigure", config)
+                        flow._task = self.hass.loop.create_future()
+                        flow._task.set_result([self.key])
+                        self.assertEqual((await flow.async_step_finish())["reason"], "verification_failed")
+                        self.assertFalse(flow._committed)
+                        self.assertIs(config.data, before)
+                    reload.assert_not_called()
+        finally:
+            await runtime.stop()
+
+    async def test_finish_rejects_entry_deindexed_while_waiting_for_runtime_acceptance(self):
+        config, runtime = await self.make_runtime()
+        before = config.data
+        try:
+            async with self.flow_environment():
+                flow = self.flow("reconfigure", config)
+                flow._task = self.hass.loop.create_future()
+                flow._task.set_result([self.key])
+                async with runtime.engine.lock:
+                    finish = asyncio.create_task(flow.async_step_finish())
+                    await asyncio.sleep(0)
+                    self.assertFalse(finish.done())
+                    self.hass.config_entries._entries.pop(config.entry_id)
+                self.assertEqual((await finish)["reason"], "verification_failed")
+                self.assertIs(config.data, before)
+        finally:
+            await runtime.stop()
+
+    async def test_finish_revalidates_inventory_when_removal_waits_ahead_of_it(self):
+        config, runtime = await self.make_runtime()
+        try:
+            async with self.flow_environment():
+                flow = self.flow("reconfigure", config)
+                flow._task = self.hass.loop.create_future()
+                flow._task.set_result([self.key])
+                async with runtime.engine.lock:
+                    removal = asyncio.create_task(runtime.remove_device(self.key))
+                    await asyncio.sleep(0)
+                    finish = asyncio.create_task(flow.async_step_finish())
+                    await asyncio.sleep(0)
+                await removal
+                self.assertEqual((await finish)["reason"], "verification_failed")
+                self.assertNotIn(self.key, self.vault.records())
+                self.assertEqual(config.data["device_keys"], [])
+        finally:
+            await runtime.stop()
+
+    async def test_overlapping_transition_confirmations_keep_the_first_selection(self):
+        config, runtime = await self.make_runtime()
+        try:
+            peer = "disposable-peer"
+            first = {**self.vault.record(self.key), "phase": "transition_required"}
+            second = {
+                **first,
+                "target": {**first["target"], "entry_id": peer, "accessory_id": "disposable-other"},
+            }
+            await self.vault.put(self.key, first)
+            await self.vault.put(peer, second)
+            async with self.flow_environment():
+                flow = self.flow("reconfigure", config)
+                flow.cur_step = await flow.async_step_transition()
+
+                async def transition(user_input=None):
+                    result = await flow.async_step_transition(user_input)
+                    flow.cur_step = result
+                    return result
+
+                async with self.vault.lock:
+                    invalid = asyncio.create_task(transition({"devices": [self.key], "confirm": False}))
+                    await asyncio.sleep(0)
+                    refresh = asyncio.create_task(transition())
+                    await asyncio.sleep(0)
+                for result in await asyncio.gather(invalid, refresh):
+                    self.assertEqual(result["errors"], {"base": "confirm_transition"})
+
+                async with self.vault.lock:
+                    accepted = asyncio.create_task(transition({"devices": [self.key], "confirm": True}))
+                    await asyncio.sleep(0)
+                    stale = asyncio.create_task(transition({"devices": [peer], "confirm": True}))
+                    await asyncio.sleep(0)
+                self.assertEqual(
+                    [result["step_id"] for result in await asyncio.gather(accepted, stale)], ["credentials"] * 2
+                )
+                self.assertEqual(flow._selected_keys, {self.target["accessory_id"].lower(): self.key})
         finally:
             await runtime.stop()

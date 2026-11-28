@@ -91,6 +91,17 @@ class BackendEdgeTests(unittest.IsolatedAsyncioTestCase):
         self.backend.inspect_recovery.assert_not_called()
         self.pairing.add_pairing.assert_not_called()
 
+    async def test_failed_pairing_checkpoint_keeps_previous_proof(self):
+        self.backend.after_write = AsyncMock(side_effect=OSError)
+        proof = [{"pairingId": "disposable-controller", "publicKey": self.target["ha_key"], "permissions": 0}]
+        with self.assertRaises(OSError):
+            await self.backend.clear_expected(self.target)
+        self.assertNotIn("expected_pairings", self.target)
+        self.target["expected_pairings"] = proof
+        with self.assertRaises(OSError):
+            await self.backend.clear_expected(self.target)
+        self.assertEqual(self.target["expected_pairings"], proof)
+
     async def test_admin_and_ha_table_pins_are_validated_and_accepted_checkpoint_clears(self):
         admin = {
             "pairingId": self.target["source"]["iOSPairingId"],

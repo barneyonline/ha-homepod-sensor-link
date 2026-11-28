@@ -241,9 +241,9 @@ class QualityLifecycleTests(unittest.IsolatedAsyncioTestCase):
         config, runtime = await self.make_runtime()
         put = self.vault.put
 
-        async def remove_before_put(key, record, *, require_existing=False):
+        async def remove_before_put(key, record, **kwargs):
             await runtime.remove_device(key)
-            return await put(key, record, require_existing=require_existing)
+            return await put(key, record, **kwargs)
 
         try:
             async with self.flow_environment() as backend:
@@ -261,20 +261,142 @@ class QualityLifecycleTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
+    async def test_reauth_failure_cannot_replace_a_newer_vault_checkpoint(self):
+        config, runtime = await self.make_runtime()
+        put = self.vault.put
+        latest = {**self.vault.record(self.key), "phase": "write_uncertain", "onboarding_attempts": [900]}
+
+        async def checkpoint_before_put(key, record, **kwargs):
+            await put(key, latest)
+            return await put(key, record, **kwargs)
+
+        try:
+            async with self.flow_environment() as backend:
+                backend.read_ha.side_effect = OSError()
+                flow = self.flow(config)
+                await flow.async_step_reauth_confirm({})
+                with patch.object(self.vault, "put", side_effect=checkpoint_before_put) as save_failure:
+                    result = await self.finish_flow(
+                        flow, await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+                    )
+                    save_failure.assert_awaited_once()
+            self.assertEqual(result["reason"], "verification_failed")
+            self.assertEqual(self.vault.record(self.key), latest)
+        finally:
+            await runtime.stop()
+
+    async def test_reauth_probe_failure_cannot_mark_a_device_disabled_during_probe(self):
+        config, runtime = await self.make_runtime(phase="active")
+        try:
+            async with self.flow_environment() as backend:
+                flow = self.flow(config)
+                await flow.async_step_reauth_confirm({})
+
+                async def read(*args, **kwargs):
+                    self.assertTrue(await runtime.set_recovery(self.key, False))
+                    raise OSError()
+
+                backend.read_ha.side_effect = read
+                result = await self.finish_flow(
+                    flow, await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+                )
+                self.assertEqual(result["reason"], "verification_failed")
+            record = self.vault.record(self.key)
+            self.assertFalse(record["target"]["recovery"])
+            self.assertIsNone(record.get("error"))
+        finally:
+            await runtime.stop()
+
+    async def test_reauthentication_decides_eligibility_from_accepted_records(self):
+        config, runtime = await self.make_runtime()
+        try:
+            peer = make_owned("disposable-peer", self.target["accessory_key"], {})
+            peer["source"] = self.source
+            peer_key = peer["entry_id"]
+            await self.vault.put(peer_key, {**self.record, "target": peer, "phase": "verified"})
+            self.hass.config_entries.async_update_entry(
+                config, data={**config.data, "device_keys": [self.key, peer_key]}
+            )
+            async with self.flow_environment():
+                self.assertTrue(await runtime.set_recovery(self.key, False))
+                flow = self.flow(config)
+                flow._selected_keys = {self.target["accessory_id"].lower(): self.key, "disposable-peer": peer_key}
+                flow._task = self.hass.loop.create_future()
+                flow._task.set_result([peer_key])
+                async with runtime.engine.lock:
+                    enabled = asyncio.create_task(runtime.set_recovery(self.key, True))
+                    await asyncio.sleep(0)
+                    finish = asyncio.create_task(flow.async_step_finish())
+                    await asyncio.sleep(0)
+                self.assertTrue(await enabled)
+                self.assertEqual((await finish)["reason"], "verification_failed")
+                self.assertTrue(runtime.records[self.key]["target"]["recovery"])
+        finally:
+            await runtime.stop()
+
+    async def test_reauthentication_checks_every_still_applicable_selection(self):
+        config, runtime = await self.make_runtime(phase="active")
+        try:
+            peer = make_owned("disposable-peer", self.target["accessory_key"], {})
+            peer["source"] = self.source
+            peer_key = peer["entry_id"]
+            await self.vault.put(peer_key, {**self.record, "target": peer, "phase": "verified"})
+            self.hass.config_entries.async_update_entry(
+                config, data={**config.data, "device_keys": [self.key, peer_key]}
+            )
+            async with self.flow_environment():
+                for disabled, reason in ((False, "verification_failed"), (True, "reauth_successful")):
+                    first = self.vault.record(self.key)
+                    if disabled:
+                        first["phase"] = "active"
+                        first["target"]["recovery"] = False
+                        first["target"].pop("source")
+                    else:
+                        first["phase"] = "needs_credentials"
+                    await self.vault.put(self.key, first)
+                    flow = self.flow(config)
+                    flow._selected_keys = {self.target["accessory_id"].lower(): self.key, "disposable-peer": peer_key}
+                    flow._task = self.hass.loop.create_future()
+                    flow._task.set_result([peer_key])
+                    result = await flow.async_step_finish()
+                    self.assertEqual(result["reason"], reason)
+                    self.assertEqual(self.vault.record(self.key), first)
+        finally:
+            await runtime.stop()
+
+    async def test_open_reauthentication_does_not_reenable_recovery_after_disable(self):
+        config, runtime = await self.make_runtime(phase="active")
+        try:
+            async with self.flow_environment() as backend:
+                flow = self.flow(config)
+                await flow.async_step_reauth_confirm({})
+                self.assertTrue(await runtime.set_recovery(self.key, False))
+                result = await self.finish_flow(
+                    flow, await flow.async_step_credential_export({"credential_export": json.dumps(self.export)})
+                )
+                self.assertEqual(result["reason"], "verification_failed")
+                backend.inspect_recovery.assert_not_awaited()
+            record = self.vault.record(self.key)
+            self.assertFalse(record["target"]["recovery"])
+            self.assertNotIn("source", record["target"])
+        finally:
+            await runtime.stop()
+
     async def test_finish_rejects_missing_or_duplicate_device_records(self):
         config, runtime = await self.make_runtime()
         duplicate = self.vault.record(self.key)
         duplicate["target"]["entry_id"] = "duplicate"
         await self.vault.put("duplicate", duplicate)
+        before = config.data
         try:
             for key in ("missing", "duplicate"):
-                with self.subTest(key=key), patch.object(runtime, "accept_inventory") as accept:
+                with self.subTest(key=key):
                     flow = self.flow(config)
                     flow._task = self.hass.loop.create_future()
                     flow._task.set_result([key])
                     async with self.flow_environment():
                         self.assertEqual((await flow.async_step_finish())["reason"], "verification_failed")
-                    accept.assert_not_called()
+                    self.assertIs(config.data, before)
         finally:
             await runtime.stop()
 

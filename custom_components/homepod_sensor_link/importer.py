@@ -209,7 +209,7 @@ def _parse_export(content: bytes | str) -> Data:
     size = len(content) if isinstance(content, bytes) else len(content.encode("utf-8"))
     if size > MAX_RAW_IMPORT:
         raise CredentialExportError("credential_export_too_large")
-    text = content.decode("utf-8-sig") if isinstance(content, bytes) else content
+    text = content.decode("utf-8-sig") if isinstance(content, bytes) else content.removeprefix("\ufeff")
     controllers: list[Data] = []
     accessories: list[Data] = []
     hosts: dict[str, None] = {}
